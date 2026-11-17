@@ -16,6 +16,8 @@ if ($a === 'save' && $isPost) {
             set_setting('base_url', $base);
         } else $msg .= ' La dirección de la aplicación no se cambió porque no es válida.';
     }
+    if (isset(ADMIN_TABS[$_POST['default_tab'] ?? ''])) set_setting('default_tab', (string)$_POST['default_tab']);
+    if (isset($_POST['contacts_per_page']) && in_array((int)$_POST['contacts_per_page'], PER_PAGE_OPTIONS, true)) set_setting('contacts_per_page', (string)(int)$_POST['contacts_per_page']);
     $https = str_starts_with((string)setting('base_url'), 'https://');
     set_setting('force_https', $https && !empty($_POST['force_https']) ? '1' : '0');
     if (!empty($_POST['force_https']) && !$https) $msg .= ' «Forzar HTTPS» requiere que la dirección empiece por https://.';
@@ -124,6 +126,14 @@ layout_start('Ajustes', 'settings'); ?>
     <h3>Tarea programada (cron)</h3>
     <p class="muted">Para que la cola se envíe sola aunque cierre el navegador, cree en el panel del hosting una tarea cada 5 minutos con esta dirección:</p>
     <pre class="code">wget -q -O /dev/null "<?= e($cron) ?>"</pre>
+    <h3>Panel</h3>
+    <div class="row2">
+      <label>Pestaña que se abre al entrar
+        <select name="default_tab"><?php foreach (ADMIN_TABS as $k => $l): ?><option value="<?= $k ?>" <?= default_tab() === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach ?></select></label>
+      <label>Contactos visibles a la vez en el listado
+        <select name="contacts_per_page"><?php $cur = (int)setting('contacts_per_page', '50'); foreach (PER_PAGE_OPTIONS as $n): ?><option value="<?= $n ?>" <?= $cur === $n ? 'selected' : '' ?>><?= per_page_label($n) ?></option><?php endforeach ?></select></label>
+    </div>
+    <p class="muted">«Todos» muestra el listado completo en una sola página; con muchos miles de contactos puede tardar en cargar.</p>
     <h3>Cambiar contraseña de acceso</h3>
     <label>Nueva contraseña (<?= e($me) ?>)<input type="password" name="newpass" id="newpass" minlength="8" autocomplete="new-password"></label>
     <label class="check showpass"><input type="checkbox" data-showpass="#newpass"> Mostrar contraseña</label>

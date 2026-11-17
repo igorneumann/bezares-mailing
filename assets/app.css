@@ -222,3 +222,7 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 .secstat>li::before{position:absolute;left:0;font-weight:700}.secstat li.ok::before{content:"✓";color:var(--ok)}
 .secstat li.warn::before{content:"!";color:var(--warn)}.secstat li.bad::before{content:"✗";color:var(--bad)}
 .secstat ul{margin:.3rem 0 0;color:#a12626}
+
+/* Paginación de contactos */
+.perpage{display:flex;align-items:center;gap:.4rem;margin-left:auto;font-size:.9rem;color:var(--muted)}
+.pager .btn.on{background:var(--brand);border-color:var(--brand);color:#fff;cursor:default}

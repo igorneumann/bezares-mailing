@@ -245,9 +245,29 @@ function brand_color(): string
 
 /* ---------- Plantilla del panel ---------- */
 
+/* ---------- Preferencias del panel ---------- */
+
+const ADMIN_TABS = ['contacts' => 'Contactos', 'emails' => 'Correos', 'media' => 'Biblioteca', 'surveys' => 'Encuestas', 'auto' => 'Automatización', 'settings' => 'Ajustes'];
+const PER_PAGE_OPTIONS = [25, 50, 100, 250, 500, 1000, 0]; // 0 = todos
+
+function default_tab(): string
+{
+    $t = setting('default_tab', 'contacts');
+    return isset(ADMIN_TABS[$t]) ? $t : 'contacts';
+}
+/** Contactos por página: el de la URL (?per=) si es una opción válida, si no el de Ajustes. 0 = todos. */
+function contacts_per_page(): int
+{
+    foreach ([$_GET['per'] ?? null, setting('contacts_per_page', '50')] as $v) {
+        if ($v !== null && $v !== '' && in_array((int)$v, PER_PAGE_OPTIONS, true)) return (int)$v;
+    }
+    return 50;
+}
+function per_page_label(int $n): string { return $n === 0 ? 'Todos' : (string)$n; }
+
 function layout_start(string $title, string $active): void
 {
-    $tabs = ['contacts' => 'Contactos', 'emails' => 'Correos', 'media' => 'Biblioteca', 'surveys' => 'Encuestas', 'auto' => 'Automatización', 'settings' => 'Ajustes'];
+    $tabs = ADMIN_TABS;
     $logo = logo_url();
     ?><!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

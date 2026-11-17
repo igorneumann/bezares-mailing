@@ -288,11 +288,15 @@ if ($a === 'edit') {
 /* ---------- Listado ---------- */
 [$w, $p] = contact_where();
 $total = (int)val("SELECT COUNT(*) FROM contacts WHERE $w", $p);
-$per = 50;
-$page = max(1, (int)($_GET['page'] ?? 1));
-$rows = all("SELECT * FROM contacts WHERE $w ORDER BY id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $p);
+$per = contacts_per_page();
+$pages = $per > 0 ? max(1, (int)ceil($total / $per)) : 1;
+$page = min($pages, max(1, (int)($_GET['page'] ?? 1)));
+$rows = all("SELECT * FROM contacts WHERE $w ORDER BY id DESC" . ($per > 0 ? " LIMIT $per OFFSET " . (($page - 1) * $per) : ''), $p);
 $tags = all_tags();
 $qs = http_build_query(array_intersect_key($_GET, ['q' => 1, 'tag' => 1, 'status' => 1]));
+$perQs = isset($_GET['per']) ? '&per=' . $per : '';   // conserva la elección de la URL al cambiar de página
+$from = $total ? ($per > 0 ? ($page - 1) * $per + 1 : 1) : 0;
+$to = $per > 0 ? min($total, $page * $per) : $total;
 $counts = ['subscribed' => 0, 'unsubscribed' => 0, 'bounced' => 0, 'pending' => 0];
 foreach (all('SELECT status, COUNT(*) n FROM contacts GROUP BY status') as $r) $counts[$r['status']] = (int)$r['n'];
 
@@ -314,6 +318,8 @@ layout_start('Contactos', 'contacts'); ?>
   <select name="status"><option value="">Todos los estados</option><?php foreach ($STATUS as $k => $l): ?><option value="<?= $k ?>" <?= ($_GET['status'] ?? '') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach ?></select>
   <button class="btn">Filtrar</button>
   <?php if ($qs): ?><a href="index.php?p=contacts">Quitar filtros</a><?php endif ?>
+  <label class="perpage">Mostrar
+    <select name="per" onchange="this.form.submit()"><?php foreach (PER_PAGE_OPTIONS as $n): ?><option value="<?= $n ?>" <?= $per === $n ? 'selected' : '' ?>><?= per_page_label($n) ?></option><?php endforeach ?></select></label>
 </form>
 
 <form method="post" action="index.php?p=contacts&a=delete" onsubmit="return confirm('¿Eliminar los contactos seleccionados?')">
@@ -339,11 +345,17 @@ layout_start('Contactos', 'contacts'); ?>
 </div>
 <div class="foot">
   <button class="btn danger small">Eliminar seleccionados</button>
-  <span class="muted"><?= $total ?> contacto(s)</span>
+  <span class="muted"><?= $total ? "Mostrando {$from}–{$to} de {$total} contacto(s)" : '0 contactos' ?></span>
+  <?php if ($pages > 1): $link = fn(int $n) => 'index.php?p=contacts&page=' . $n . $perQs . ($qs ? '&' . e($qs) : ''); ?>
   <span class="pager">
-    <?php if ($page > 1): ?><a class="btn small" href="index.php?p=contacts&page=<?= $page - 1 ?>&<?= e($qs) ?>">← Anterior</a><?php endif ?>
-    <?php if ($page * $per < $total): ?><a class="btn small" href="index.php?p=contacts&page=<?= $page + 1 ?>&<?= e($qs) ?>">Siguiente →</a><?php endif ?>
+    <?php if ($page > 1): ?><a class="btn small" href="<?= $link($page - 1) ?>">← Anterior</a><?php endif ?>
+    <?php $nums = array_unique([1, $page - 2, $page - 1, $page, $page + 1, $page + 2, $pages]); sort($nums); foreach ($nums as $n): if ($n < 1 || $n > $pages) continue; ?>
+      <?php if (isset($prevN) && $n > $prevN + 1): ?><span class="muted">…</span><?php endif; $prevN = $n; ?>
+      <?php if ($n === $page): ?><span class="btn small on"><?= $n ?></span><?php else: ?><a class="btn small" href="<?= $link($n) ?>"><?= $n ?></a><?php endif ?>
+    <?php endforeach ?>
+    <?php if ($page < $pages): ?><a class="btn small" href="<?= $link($page + 1) ?>">Siguiente →</a><?php endif ?>
   </span>
+  <?php endif ?>
 </div>
 </form>
 

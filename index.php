@@ -12,7 +12,7 @@ start_session();
 
 if (!cfg()) { require __DIR__ . '/pages/install.php'; exit; }
 
-$p = (string)($_GET['p'] ?? 'contacts');
+$p = (string)($_GET['p'] ?? '');
 $a = (string)($_GET['a'] ?? 'list');
 
 if ($p === 'logout') { $_SESSION = []; session_destroy(); remember_clear(); redirect('index.php'); }
@@ -20,7 +20,7 @@ if (empty($_SESSION['uid']) && ($uid = remember_check())) { session_regenerate_i
 if (empty($_SESSION['uid'])) { require __DIR__ . '/pages/login.php'; exit; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST') csrf_check();
 
-if (!in_array($p, ['contacts', 'emails', 'media', 'surveys', 'auto', 'settings'], true)) $p = 'contacts';
+if (!isset(ADMIN_TABS[$p])) $p = default_tab(); // sin pestaña indicada (o desconocida): la elegida en Ajustes
 try {
     require __DIR__ . "/pages/$p.php";
 } catch (Throwable $e) {
