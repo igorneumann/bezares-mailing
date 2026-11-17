@@ -253,6 +253,8 @@ function all_tags(): array
     return $n;
 }
 function sign(string $data): string { return substr(hash_hmac('sha256', $data, cfg()['secret']), 0, 16); }
+/** Clave del modo kiosco del formulario de suscripción; cambia al regenerarla en Automatización. */
+function kiosk_key(): string { return sign('kiosk|' . setting('sub_kiosk_gen', '1')); }
 
 function logo_url(): string
 {

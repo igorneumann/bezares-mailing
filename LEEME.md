@@ -70,6 +70,10 @@ confirmar» hasta que pulsa el enlace del correo. A cada alta se le pone la etiq
 `subscribe.php?lang=both` es la versión bilingüe: todos los textos en español e inglés y dos casillas, «Boletín en
 español» y «Boletín en inglés»; el alta recibe la etiqueta de cada boletín marcado (hay que marcar al menos uno) y el
 correo de confirmación va en inglés si solo se marca el inglés, y en español en los demás casos.
+**Modo kiosco** (tablet o pantalla en una feria, recepción…): los enlaces de kiosco de Automatización añaden
+`&kiosco=<clave>`. Tras enviar, el mensaje se muestra 5 segundos (configurable) y vuelve el formulario vacío, sin
+autocompletar los datos de la persona anterior, y el límite de altas por IP sube a 120/hora y 600/día. La clave se
+puede regenerar si el enlace se difunde fuera del kiosco.
 
 ### Encuestas en dos idiomas (español e inglés)
 Cada encuesta es una sola y lleva su traducción al inglés (título, textos y preguntas). El correo tiene un campo

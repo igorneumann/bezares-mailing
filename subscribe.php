@@ -17,6 +17,13 @@ public_boot(true);
 $both = (string)($_GET['lang'] ?? $_POST['lang'] ?? '') === 'both';
 $lang = lang_of($_GET['lang'] ?? $_POST['lang'] ?? 'es');
 $qs = $both ? '?lang=both' : ($lang === 'en' ? '?lang=en' : '');
+/* Modo kiosco (&kiosco=<clave firmada>, el enlace está en Automatización): tras enviar, el mensaje se muestra unos
+   segundos y vuelve el formulario vacío; el navegador no autocompleta datos de la persona anterior y el límite de altas
+   por IP es mucho mayor, porque todas las altas llegan desde el mismo dispositivo. */
+$kioskKey = (string)($_GET['kiosco'] ?? $_POST['kiosco'] ?? '');
+$kiosk = $kioskKey !== '' && hash_equals(kiosk_key(), $kioskKey);
+if ($kiosk) $qs .= ($qs === '' ? '?' : '&') . 'kiosco=' . rawurlencode($kioskKey);
+$kioskSecs = max(2, min(120, (int)setting('sub_kiosk_secs', '5')));
 $S = [
     'email' => ['Correo electrónico', 'Email address'], 'name' => ['Nombre', 'First name'], 'surname' => ['Apellidos', 'Last name'],
     'company' => ['Empresa', 'Company'], 'button' => ['Suscribirme', 'Subscribe'],
@@ -59,6 +66,9 @@ function sub_page(string $lang, string $inner): void
     $c = brand_color(); ?><!doctype html>
 <html lang="<?= $GLOBALS['both'] ? 'es' : $lang ?>"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Newsletter</title>
+<?php if ($GLOBALS['kiosk'] && strpos($inner, '<form') === false): // kiosco: tras el mensaje, vuelve el formulario vacío ?>
+<meta http-equiv="refresh" content="<?= $GLOBALS['kioskSecs'] ?>;url=subscribe.php<?= e($GLOBALS['qs']) ?>">
+<?php endif ?>
 <style>
 *{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent}
 body{font-family:Ubuntu,"Segoe UI",Helvetica,Arial,sans-serif;font-size:15px;line-height:1.4;color:#16242d;padding:2px}
@@ -119,7 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bot = ($_POST['web'] ?? '') !== '' || !hash_equals(sign('ts' . $ts), (string)($_POST['th'] ?? '')) || time() - $ts < 2;
     $neutral = $msg($t($double ? 'check_inbox' : 'done'));
     if ($bot) sub_page($lang, $neutral);
-    if (!throttle_ok('sub-ip:' . $ip, 10, 3600) || !throttle_ok('sub-ip:' . $ip, 30, 86400)) sub_page($lang, $msg($t('too_many'), true));
+    [$perHour, $perDay] = $kiosk ? [120, 600] : [10, 30];
+    if (!throttle_ok('sub-ip:' . $ip, $perHour, 3600) || !throttle_ok('sub-ip:' . $ip, $perDay, 86400)) sub_page($lang, $msg($t('too_many'), true));
     if ($both) $lang = $lists === ['en'] ? 'en' : 'es'; // idioma del correo de confirmación
     if (time() - $ts > 43200) $err = $t('expired');
     elseif (!valid_email($email)) $err = $t('bad_email');
@@ -164,16 +175,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $ts = time();
 ob_start(); ?>
 <?php if ($err): ?><?= $msg($err, true) ?><div style="height:10px"></div><?php endif ?>
-<form method="post" action="subscribe.php<?= $qs ?>" novalidate>
+<form method="post" action="subscribe.php<?= e($qs) ?>" novalidate<?= $kiosk ? ' autocomplete="off"' : '' ?>>
   <input type="hidden" name="lang" value="<?= $both ? 'both' : $lang ?>"><input type="hidden" name="ts" value="<?= $ts ?>"><input type="hidden" name="th" value="<?= sign('ts' . $ts) ?>">
   <div class="hp" aria-hidden="true"><label>Web<input type="text" name="web" tabindex="-1" autocomplete="off"></label></div>
-  <label><?= $t('email') ?> *<input type="email" name="email" value="<?= e($in['email']) ?>" required autocomplete="email"></label>
+  <label><?= $t('email') ?> *<input type="email" name="email" value="<?= e($in['email']) ?>" required autocomplete="<?= $kiosk ? 'off' : 'email' ?>"></label>
   <?php if ($askName): ?>
   <div class="two">
-    <label><?= $t('name') ?><input type="text" name="nombre" value="<?= e($in['nombre']) ?>" autocomplete="given-name"></label>
-    <label><?= $t('surname') ?><input type="text" name="apellidos" value="<?= e($in['apellidos']) ?>" autocomplete="family-name"></label>
+    <label><?= $t('name') ?><input type="text" name="nombre" value="<?= e($in['nombre']) ?>" autocomplete="<?= $kiosk ? 'off' : 'given-name' ?>"></label>
+    <label><?= $t('surname') ?><input type="text" name="apellidos" value="<?= e($in['apellidos']) ?>" autocomplete="<?= $kiosk ? 'off' : 'family-name' ?>"></label>
   </div>
-  <label><?= $t('company') ?><input type="text" name="empresa" value="<?= e($in['empresa']) ?>" autocomplete="organization"></label>
+  <label><?= $t('company') ?><input type="text" name="empresa" value="<?= e($in['empresa']) ?>" autocomplete="<?= $kiosk ? 'off' : 'organization' ?>"></label>
   <?php endif ?>
   <?php if ($both): $sel = $_SERVER['REQUEST_METHOD'] === 'POST' ? $lists : []; ?>
   <fieldset class="lists"><legend><?= $t('lists') ?> *</legend>

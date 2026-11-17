@@ -60,7 +60,13 @@ if ($a === 'subsave' && $isPost) {
     set_setting('sub_fields', empty($_POST['sub_fields']) ? '0' : '1');
     set_setting('sub_privacy_es', trim((string)($_POST['sub_privacy_es'] ?? '')));
     set_setting('sub_privacy_en', trim((string)($_POST['sub_privacy_en'] ?? '')));
+    set_setting('sub_kiosk_secs', (string)max(2, min(120, (int)($_POST['sub_kiosk_secs'] ?? 5))));
     flash('Formulario de suscripción guardado.');
+    redirect('index.php?p=auto#suscripcion');
+}
+if ($a === 'kioskregen' && $isPost) {
+    set_setting('sub_kiosk_gen', (string)((int)setting('sub_kiosk_gen', '1') + 1));
+    flash('Nueva clave de kiosco generada: los enlaces de kiosco anteriores dejan de funcionar como kiosco.');
     redirect('index.php?p=auto#suscripcion');
 }
 /* ---------- Generador de newsletter ---------- */
@@ -221,6 +227,11 @@ $pend = (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'pending'");
       <label style="margin-top:1rem">Código para incrustar · Bilingüe, con una casilla por boletín <a href="<?= e($subUrl) ?>?lang=both" target="_blank">(ver)</a>
         <textarea rows="3" readonly onclick="this.select()" class="codebox"><?= e($embed('both')) ?></textarea></label>
       <button type="button" class="btn small" data-copy="<?= e($embed('both')) ?>">Copiar código</button>
+      <h3 style="margin:1.2rem 0 .3rem">Modo kiosco</h3>
+      <p class="muted" style="margin:0 0 .4rem">Para una tablet o pantalla donde se apunta mucha gente seguida: tras enviar, el mensaje se ve unos segundos y vuelve el formulario vacío, el navegador no sugiere los datos de la persona anterior y se admiten muchas más altas desde el mismo dispositivo. Abra en el kiosco el enlace del idioma que quiera:</p>
+      <?php foreach (['both' => 'Bilingüe', 'es' => 'Español', 'en' => 'English'] as $lg => $lgName): $ku = $subUrl . '?' . ($lg === 'es' ? '' : 'lang=' . $lg . '&') . 'kiosco=' . kiosk_key(); ?>
+        <label><?= $lgName ?> <a href="<?= e($ku) ?>" target="_blank">(ver)</a><input readonly onclick="this.select()" class="codebox" value="<?= e($ku) ?>"></label>
+      <?php endforeach ?>
       <p class="muted" style="margin-top:.8rem">El formulario comunica su altura a la página (mensaje <code>bezaresMailingHeight</code>) por si quiere ajustar el iframe automáticamente.</p>
     </div>
     <form method="post" action="index.php?p=auto&a=subsave">
@@ -235,7 +246,11 @@ $pend = (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'pending'");
       </div>
       <label class="check"><input type="checkbox" name="sub_double" <?= setting('sub_double', '1') === '1' ? 'checked' : '' ?>> Doble confirmación: enviar un correo con un enlace para confirmar el alta (recomendado)</label>
       <label class="check"><input type="checkbox" name="sub_fields" <?= setting('sub_fields', '1') === '1' ? 'checked' : '' ?>> Pedir también nombre, apellidos y empresa (si no, solo el correo)</label>
+      <label>Modo kiosco: segundos que se muestra el mensaje antes de volver al formulario<input type="number" name="sub_kiosk_secs" min="2" max="120" value="<?= e(setting('sub_kiosk_secs', '5')) ?>" style="max-width:8rem"></label>
       <button class="btn primary">Guardar</button>
+    </form>
+    <form method="post" action="index.php?p=auto&a=kioskregen" onsubmit="return confirm('Los enlaces de kiosco actuales dejarán de funcionar como kiosco. ¿Continuar?')" style="margin-top:.6rem">
+      <?= csrf_field() ?><button class="btn small">Regenerar clave de kiosco</button>
     </form>
   </div>
 </div>
