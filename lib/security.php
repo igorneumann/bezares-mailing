@@ -95,7 +95,10 @@ function enforce_canonical(): void
     }
     $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? 'index.php'));
     $qs = (string)($_SERVER['QUERY_STRING'] ?? '');
-    header('Location: ' . rtrim($base, '/') . '/' . $script . ($qs !== '' ? '?' . $qs : ''), true, 301);
+    // 302 (temporal) y sin caché: una 301 la guarda el navegador y seguiría redirigiendo al dominio antiguo
+    // aunque luego se cambie la dirección en config.php.
+    header('Cache-Control: no-store');
+    header('Location: ' . rtrim($base, '/') . '/' . $script . ($qs !== '' ? '?' . $qs : ''), true, 302);
     exit;
 }
 
