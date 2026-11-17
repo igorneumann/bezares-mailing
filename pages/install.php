@@ -16,10 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!is_writable($dataDir)) throw new RuntimeException('La carpeta "data" no tiene permisos de escritura.');
         // Dirección de la aplicación: se fija aquí y a partir de ahora todos los enlaces y cookies dependen de ella
         $base = rtrim(trim((string)$in['base_url']), '/');
-        $bp = parse_url($base);
-        if (!filter_var($base, FILTER_VALIDATE_URL) || !in_array(strtolower($bp['scheme'] ?? ''), ['http', 'https'], true) || isset($bp['query']) || isset($bp['fragment']) || isset($bp['user']))
+        if (!valid_base_url($base))
             throw new RuntimeException('La dirección de la aplicación no es válida (ejemplo: https://mailing.bezares.com).');
-        $c = ['secret' => token(24)];
+        $c = ['secret' => token(24), 'base_url' => $base];
         // Carpeta de datos opcional fuera de la carpeta pública (la base de datos y las importaciones no se pueden descargar)
         if (!empty($in['outside'])) {
             $dd = rtrim(trim((string)$in['data_dir']), '/\\');

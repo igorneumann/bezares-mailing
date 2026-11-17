@@ -55,14 +55,14 @@ function is_https(): bool
 /** true si la dirección configurada de la aplicación es https: entonces las cookies van siempre con Secure. */
 function base_is_https(): bool
 {
-    $b = cfg() ? (string)setting('base_url') : '';
+    $b = stored_base_url();
     return $b !== '' ? str_starts_with(strtolower($b), 'https://') : is_https();
 }
 
 /** Ruta de las cookies: la carpeta de la aplicación según la dirección configurada. */
 function cookie_path(): string
 {
-    $b = cfg() ? (string)setting('base_url') : '';
+    $b = stored_base_url();
     $p = $b !== '' ? (string)parse_url($b, PHP_URL_PATH) : '';
     return rtrim($p, '/') . '/';
 }
@@ -74,7 +74,9 @@ function cookie_path(): string
 function enforce_canonical(): void
 {
     if (PHP_SAPI === 'cli' || !cfg()) return;
-    $base = (string)setting('base_url');
+    // Solo la dirección de config.php: si se cambia de dominio y la de Ajustes (versiones anteriores) quedó
+    // apuntando al antiguo, no se redirige allí y se puede entrar por el nuevo para corregirla.
+    $base = config_base_url();
     if ($base === '') return;
     $want = parse_url($base);
     if (empty($want['host'])) return;
@@ -143,7 +145,7 @@ function site_of(string $host): string
  */
 function cross_site_embedding(): bool
 {
-    $base = (string)(cfg() ? setting('base_url') : '');
+    $base = stored_base_url();
     $mine = site_of((string)parse_url($base, PHP_URL_HOST));
     foreach (frame_origins() as $o) {
         if (site_of((string)parse_url(str_replace('*.', 'x.', $o), PHP_URL_HOST)) !== $mine) return true;
@@ -280,7 +282,7 @@ function resolve_host(string $host): array
 function exposure_check(): array
 {
     if (!function_exists('curl_init')) return ['No se puede comprobar: falta la extensión cURL de PHP.'];
-    $base = rtrim((string)setting('base_url'), '/');
+    $base = stored_base_url();
     if ($base === '') return ['No se puede comprobar: falta la dirección de la aplicación en Ajustes.'];
     $problems = [];
     $get = function (string $url): array {

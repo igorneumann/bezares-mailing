@@ -8,7 +8,7 @@ function seed_defaults(string $adminEmail, string $baseUrl = ''): void
     $settings = [
         'company' => 'BEZARES SA', 'address' => "Av. de las Retamas, 145 | Casarrubios del Monte, Toledo | 45950\nSpain",
         'color' => $color, 'logo' => is_file(ROOT . '/uploads/logo.png') ? 'logo.png' : '',
-        'base_url' => $baseUrl !== '' ? $baseUrl : detect_base_url(), 'force_https' => str_starts_with($baseUrl, 'https://') ? '1' : '0', 'from_name' => 'Bezares Mailing', 'from_email' => '', 'reply_to' => '',
+        'force_https' => str_starts_with($baseUrl, 'https://') ? '1' : '0', 'from_name' => 'Bezares Mailing', 'from_email' => '', 'reply_to' => '',
         'driver' => 'smtp', 'smtp_host' => '', 'smtp_port' => '587', 'smtp_secure' => 'tls', 'smtp_user' => '', 'smtp_pass' => '',
         'batch' => '20', 'hourly_limit' => '0', 'cron_key' => token(12),
         'unsub_text' => 'Si no desea recibir más correos nuestros, puede [darse de baja] / [Unsubscribe].',

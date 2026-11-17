@@ -140,10 +140,46 @@ function detect_base_url(): string
     $dir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
     return ($https ? 'https' : 'http') . '://' . $host . $dir;
 }
+/**
+ * Dirección de la aplicación fijada en data/config.php ('base_url' => 'https://mailing.bezares.com').
+ * Es la única que se usa para redirigir al dominio correcto, así que cambiar de dominio es editar esa línea.
+ */
+function config_base_url(): string
+{
+    return rtrim(trim((string)(cfg()['base_url'] ?? '')), '/');
+}
+/** Dirección guardada: la de config.php o, en instalaciones anteriores a la 2.15, la que quedó en Ajustes. */
+function stored_base_url(): string
+{
+    if (!cfg()) return '';
+    $b = config_base_url();
+    return $b !== '' ? $b : rtrim((string)setting('base_url'), '/');
+}
 function base_url(): string
 {
-    $b = setting('base_url');
+    $b = stored_base_url();
     return rtrim($b !== '' ? $b : detect_base_url(), '/');
+}
+/** true si la dirección es válida para la aplicación (http/https, sin consulta, fragmento ni usuario). */
+function valid_base_url(string $base): bool
+{
+    $bp = parse_url($base);
+    return (bool)filter_var($base, FILTER_VALIDATE_URL) && in_array(strtolower($bp['scheme'] ?? ''), ['http', 'https'], true)
+        && !isset($bp['query']) && !isset($bp['fragment']) && !isset($bp['user']);
+}
+/** Cambia claves de data/config.php (null = quitarla). Devuelve false si el archivo no se puede escribir. */
+function write_config(array $changes): bool
+{
+    $f = ROOT . '/data/config.php';
+    $c = cfg();
+    if (!$c || !is_writable($f)) return false;
+    foreach ($changes as $k => $v) { if ($v === null) unset($c[$k]); else $c[$k] = $v; }
+    $tmp = $f . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, "<?php\nreturn " . var_export($c, true) . ";\n", LOCK_EX) === false) return false;
+    @chmod($tmp, fileperms($f) & 0777);
+    if (!@rename($tmp, $f)) { @unlink($tmp); return false; }
+    if (function_exists('opcache_invalidate')) @opcache_invalidate($f, true);
+    return true;
 }
 function redirect(string $to): void { header('Location: ' . $to); exit; }
 function flash(?string $msg = null, string $type = 'ok'): array

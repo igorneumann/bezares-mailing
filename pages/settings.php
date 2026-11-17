@@ -8,17 +8,23 @@ if ($a === 'save' && $isPost) {
     foreach ($fields as $f) if (isset($_POST[$f])) set_setting($f, trim((string)$_POST[$f]));
     if (isset($_POST['smtp_pass'])) set_setting('smtp_pass', (string)$_POST['smtp_pass']);
     $msg = 'Ajustes guardados.';
-    // Dirección de la aplicación: base de todos los enlaces y de las cookies. Se valida antes de guardarla.
+    // Dirección de la aplicación: base de todos los enlaces y de las cookies. Se guarda en data/config.php.
     if (isset($_POST['base_url'])) {
         $base = rtrim(trim((string)$_POST['base_url']), '/');
-        $bp = parse_url($base);
-        if (filter_var($base, FILTER_VALIDATE_URL) && in_array(strtolower($bp['scheme'] ?? ''), ['http', 'https'], true) && !isset($bp['query']) && !isset($bp['fragment']) && !isset($bp['user'])) {
-            set_setting('base_url', $base);
-        } else $msg .= ' La dirección de la aplicación no se cambió porque no es válida.';
+        if (!valid_base_url($base)) {
+            $msg .= ' La dirección de la aplicación no se cambió porque no es válida.';
+        } elseif ($base !== config_base_url()) {
+            if (write_config(['base_url' => $base])) {
+                set_setting('base_url', ''); // la antigua de Ajustes ya no se usa
+                $msg .= ' Dirección guardada en data/config.php.';
+            } else {
+                $msg .= " No se pudo escribir data/config.php: añada a mano la línea 'base_url' => '$base', en ese archivo.";
+            }
+        }
     }
     if (isset(ADMIN_TABS[$_POST['default_tab'] ?? ''])) set_setting('default_tab', (string)$_POST['default_tab']);
     if (isset($_POST['contacts_per_page']) && in_array((int)$_POST['contacts_per_page'], PER_PAGE_OPTIONS, true)) set_setting('contacts_per_page', (string)(int)$_POST['contacts_per_page']);
-    $https = str_starts_with((string)setting('base_url'), 'https://');
+    $https = str_starts_with(base_url(), 'https://');
     set_setting('force_https', $https && !empty($_POST['force_https']) ? '1' : '0');
     // URLs de confianza que pueden incrustar la aplicación (Nextcloud, intranet…)
     if (isset($_POST['frame_origins'])) {
@@ -93,7 +99,11 @@ layout_start('Ajustes', 'settings'); ?>
     </div>
     <?php if (logo_url()): ?><p><img src="<?= e(logo_url()) ?>" alt="Logo actual" style="max-height:60px"></p><?php endif ?>
     <label>Texto de baja (el texto entre [corchetes] será el enlace)<input name="unsub_text" value="<?= $s('unsub_text') ?>"></label>
-    <label>Dirección web de esta aplicación<input type="url" name="base_url" value="<?= e(base_url()) ?>" required></label>
+    <?php $here = rtrim(detect_base_url(), '/'); $mismatch = config_base_url() === '' && stored_base_url() !== '' && stored_base_url() !== $here; ?>
+    <label>Dirección web de esta aplicación<input type="url" name="base_url" value="<?= e($mismatch ? $here : base_url()) ?>" required></label>
+    <?php if ($mismatch): ?><p class="muted" style="color:#a12626;margin-top:-.5rem">La dirección guardada era <code><?= e(stored_base_url()) ?></code>, pero está entrando por <code><?= e($here) ?></code>. Guarde los ajustes para usar la nueva en los enlaces de los correos.</p>
+    <?php elseif (config_base_url() === ''): ?><p class="muted" style="margin-top:-.5rem">Al guardar, la dirección se escribe en <code>data/config.php</code>.</p>
+    <?php else: ?><p class="muted" style="margin-top:-.5rem">Se guarda en <code>data/config.php</code> (<code>'base_url' =&gt; '…'</code>). Si cambia de dominio y no puede entrar, edite esa línea en el archivo.</p><?php endif ?>
     <label class="check"><input type="checkbox" name="force_https" <?= setting('force_https') === '1' ? 'checked' : '' ?> <?= str_starts_with(base_url(), 'https://') ? '' : 'disabled' ?>> Forzar HTTPS (redirige http → https y activa HSTS)</label>
     <label>URLs de confianza que pueden incrustar la aplicación (una por línea)
       <textarea name="frame_origins" rows="2" placeholder="https://cloud.bezares.com"><?= e(implode("\n", frame_origins())) ?></textarea></label>

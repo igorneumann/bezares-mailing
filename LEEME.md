@@ -94,8 +94,13 @@ títulos de los bloques «Artículo» y «2 columnas»; con menos de 2 titulares
 
 ## Seguridad
 
-- **Dirección fija**: la dirección de la aplicación se indica al instalar y se cambia en Ajustes. Todos los enlaces y las
-  cookies dependen de ella; las peticiones que llegan con otro nombre de host se redirigen a ella.
+- **Dirección fija**: la dirección de la aplicación se indica al instalar y queda en `data/config.php`
+  (`'base_url' => 'https://mailing.bezares.com',`). Todos los enlaces y las cookies dependen de ella; las peticiones que
+  llegan con otro nombre de host se redirigen a ella. Se puede cambiar en Ajustes (escribe en ese archivo) o editando la
+  línea a mano.
+- **Cambiar de dominio**: apunte el nuevo dominio a la carpeta de la aplicación y cambie `'base_url'` en
+  `data/config.php` (por FTP o el gestor de archivos del hosting). Si cambia el dominio antes de cambiar la dirección,
+  la aplicación le redirige al antiguo y no podrá entrar hasta editar el archivo.
 - **HTTPS**: con una dirección `https://` las cookies llevan siempre `Secure`, y «Forzar HTTPS» redirige http → https y
   activa HSTS. Detrás de un proxy inverso, declare su IP en `data/config.php`:
   `'trusted_proxies' => ['10.0.0.5'],`. Solo entonces se aceptan `X-Forwarded-Proto` y `X-Forwarded-For`.
