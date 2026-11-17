@@ -262,7 +262,7 @@ function media_usage(string $name): array
 function migrate(): void
 {
     $v = (int)setting('schema', '1');
-    if ($v >= 6) return;
+    if ($v >= 7) return;
     $try = function (string $sql) { try { db()->exec($sql); } catch (Throwable $e) { /* ya existe */ } };
     if ($v < 2) $try('ALTER TABLE emails ADD COLUMN attachments TEXT');
     // v3: tabla de campañas NPS automáticas (CREATE TABLE IF NOT EXISTS del esquema completo)
@@ -282,6 +282,18 @@ function migrate(): void
         q("UPDATE surveys SET is_public = 0 WHERE slug = 'nps' OR title LIKE 'NPS-Q%'");
     }
     set_setting('schema', '6');
+    // v7: bajas por listado. Cada envío recuerda su etiqueta y cada contacto, de qué etiquetas se ha dado de baja.
+    $try("ALTER TABLE contacts ADD COLUMN unsub_tags VARCHAR(500) NOT NULL DEFAULT ''");
+    $try("ALTER TABLE sends ADD COLUMN tag VARCHAR(190) NOT NULL DEFAULT ''");
+    if ($v < 7) {
+        // Envíos anteriores: el segmento era el nombre de la etiqueta salvo en los envíos a todos y los recordatorios
+        foreach (all("SELECT id, segment FROM sends WHERE tag = ''") as $r) {
+            $seg = mb_strtolower(trim((string)$r['segment']));
+            if ($seg === '' || in_array($seg, ['todos los suscritos', 'todos', 'recordatorio: sin respuesta', 'reminder: no answer'], true) || str_contains($seg, ' + ')) continue;
+            if ((int)val('SELECT COUNT(*) FROM contacts WHERE tags LIKE ?', ['%,' . $seg . ',%']) > 0) q('UPDATE sends SET tag = ? WHERE id = ?', [$seg, $r['id']]);
+        }
+    }
+    set_setting('schema', '7');
     if ($v < 4 && function_exists('nps_bilingual_setup')) { try { nps_bilingual_setup(); } catch (Throwable $e) {} }
     try { nps_notify_setup(); } catch (Throwable $e) {}
 }

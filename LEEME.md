@@ -36,6 +36,17 @@ Si el servidor es Nginx (no Apache), los `.htaccess` no se aplican: añada las r
 - **Encuestas**: preguntas de escala 0–10 (NPS), 1–5, texto y opciones. Límite de respuestas por
   contacto (por correo electrónico). Cada encuesta tiene su página de resultados con el NPS.
 
+### Bajas por listado
+El enlace de baja de cada correo da de baja **solo del listado (etiqueta) al que se envió**: quien se da de baja de la
+newsletter sigue recibiendo los correos que se envíen a otras etiquetas (clientes, proveedores…). La página de baja ofrece
+también «darme de baja de todas las comunicaciones». La baja en un clic de Gmail/Outlook también es del listado.
+- Si el correo se envió a «Todos los suscritos», el enlace da de baja de todo.
+- La etiqueta se conserva (aparece tachada) y el contacto deja de recibir los envíos a ella, también las campañas NPS
+  y sus recordatorios. Importar o añadir la etiqueta de nuevo no anula la baja.
+- Volver a un listado exige confirmar por correo (desde la página de baja o el formulario de suscripción). Un
+  administrador puede editar las «Bajas de listados» en la ficha del contacto si el contacto se lo pide.
+- En Etiquetas, «Bajas» cuenta a quien se dio de baja de todo y a quien se dio de baja solo de esa etiqueta.
+
 ### Automatización (requiere la tarea cron)
 - **NPS automático**: en las fechas configuradas (día/mes; la primera del año es Q1, la segunda Q2…) crea un correo y una
   encuesta `NPS-Q1-2027` copiando la plantilla, los envía al listado, manda un recordatorio a quien no haya respondido

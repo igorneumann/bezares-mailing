@@ -244,3 +244,5 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 
 .tagactions{text-align:right}.tagactions .btn{margin-left:.15rem}
 .tagtable .barcol{width:22%}
+
+.tag.off{background:#f1f1f1;color:#999;text-decoration:line-through}

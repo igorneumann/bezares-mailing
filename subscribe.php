@@ -122,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($ex['status'] !== 'subscribed') {
                 // Baja, rebote o pendiente: la reactivación exige SIEMPRE confirmar por correo. No se toca nada hasta entonces.
                 send_confirmation($ex, $lang, $tagFor(), $data);
+            } elseif (array_intersect($tagFor(), optouts($ex))) {
+                // Se había dado de baja de este listado: volver a él exige SIEMPRE confirmar por correo
+                send_confirmation($ex, $lang, $tagFor(), $data);
             } elseif ($double) {
                 // Ya suscrito: las nuevas etiquetas (otro listado) también esperan a la confirmación
                 if (array_diff($tagFor(), tags_list($ex['tags']))) send_confirmation($ex, $lang, $tagFor(), $data);

@@ -145,9 +145,10 @@ function clone_email(array $e, string $name, ?int $surveyId, string $subjectPref
 }
 
 /** Pone un correo en la cola para una lista de contactos. Devuelve el id del envío. */
-function queue_send(int $emailId, array $contactIds, string $segment): int
+/** Pone un correo en la cola. $tag: listado al que se envía ('' = todos los suscritos); decide de qué se da de baja quien lo reciba. */
+function queue_send(int $emailId, array $contactIds, string $segment, string $tag = ''): int
 {
-    $sendId = insert('INSERT INTO sends (email_id, segment, total, created_at) VALUES (?,?,?,?)', [$emailId, $segment, count($contactIds), now()]);
+    $sendId = insert('INSERT INTO sends (email_id, segment, total, created_at, tag) VALUES (?,?,?,?,?)', [$emailId, $segment, count($contactIds), now(), mb_strtolower(trim($tag))]);
     $st = db()->prepare("INSERT INTO queue (send_id, email_id, contact_id, status) VALUES (?, ?, ?, 'pending')");
     foreach ($contactIds as $cid) $st->execute([$sendId, $emailId, $cid]);
     return $sendId;
@@ -159,7 +160,7 @@ function nps_audiences(): array
     $c = nps_config();
     $list = function (string $tag): array {
         $w = "status = 'subscribed'"; $p = [];
-        if ($tag !== '') { $w .= ' AND tags LIKE ?'; $p[] = '%,' . mb_strtolower($tag) . ',%'; }
+        if ($tag !== '') { [$tw, $p] = tag_audience_sql($tag); $w .= ' AND ' . $tw; } // sin quienes se dieron de baja de ese listado
         return array_map('intval', array_column(all("SELECT id FROM contacts WHERE $w ORDER BY id", $p), 'id'));
     };
     $en = $c['tag_en'] !== '' ? $list($c['tag_en']) : [];
@@ -190,11 +191,11 @@ function nps_launch(string $label, ?int $base = null): array
     try {
         $surveyId = clone_survey((int)$tpl['survey_id'], $label);
         $emailId = clone_email($tpl, $label, $surveyId);
-        $sendId = $aud['es'] ? queue_send($emailId, $aud['es'], $c['tag'] !== '' ? $c['tag'] : 'Todos los suscritos') : null;
+        $sendId = $aud['es'] ? queue_send($emailId, $aud['es'], $c['tag'] !== '' ? $c['tag'] : 'Todos los suscritos', $c['tag']) : null;
         $emailEn = $sendEn = null;
         if ($aud['en']) {
             $emailEn = clone_email($tplEn, $label . ' (en)', $surveyId);
-            $sendEn = queue_send($emailEn, $aud['en'], $c['tag_en']);
+            $sendEn = queue_send($emailEn, $aud['en'], $c['tag_en'], $c['tag_en']);
         }
         $rem = $c['reminder_days'] > 0 ? $base + $c['reminder_days'] * 86400 : null;
         $res = ($rem ?? $base) + $c['results_days'] * 86400;
@@ -220,12 +221,15 @@ function nps_remind(array $run): int
         if (empty($run[$ek]) || empty($run[$sk])) continue;
         $email = one('SELECT * FROM emails WHERE id = ?', [$run[$ek]]);
         if (!$email) continue;
+        $stag = (string)val('SELECT tag FROM sends WHERE id = ?', [$run[$sk]]);
         $ids = array_column(all("SELECT DISTINCT c.id FROM queue q JOIN contacts c ON c.id = q.contact_id
-            WHERE q.send_id = ? AND q.status = 'sent' AND c.status = 'subscribed'
-              AND c.email NOT IN (SELECT email FROM responses WHERE survey_id = ?) ORDER BY c.id", [$run[$sk], $run['survey_id']]), 'id');
+            WHERE q.send_id = ? AND q.status = 'sent' AND c.status = 'subscribed'" . ($stag !== '' ? ' AND c.unsub_tags NOT LIKE ?' : '') . "
+              AND c.email NOT IN (SELECT email FROM responses WHERE survey_id = ?) ORDER BY c.id",
+            array_merge([$run[$sk]], $stag !== '' ? ['%,' . $stag . ',%'] : [], [$run['survey_id']])), 'id');
         if (!$ids) continue;
         $id = clone_email($email, $run['label'] . $suffix, (int)$run['survey_id'], $prefix);
-        queue_send($id, $ids, $ek === 'email_id' ? 'Recordatorio: sin respuesta' : 'Reminder: no answer');
+        // El recordatorio va al mismo listado que el envío original
+        queue_send($id, $ids, $ek === 'email_id' ? 'Recordatorio: sin respuesta' : 'Reminder: no answer', (string)val('SELECT tag FROM sends WHERE id = ?', [$run[$sk]]));
         $remId ??= $id;
         $total += count($ids);
     }

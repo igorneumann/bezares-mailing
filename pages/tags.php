@@ -2,11 +2,14 @@
 /* Pestaña Etiquetas: todas las etiquetas con cuántos contactos tiene cada una.
    Al pulsar una etiqueta se abre Contactos filtrado por ella. */
 $stats = [];
-foreach (all("SELECT tags, status FROM contacts WHERE tags <> ''") as $r) {
+foreach (all("SELECT tags, status, unsub_tags FROM contacts WHERE tags <> ''") as $r) {
+    $off = optouts($r);
     foreach (tags_list($r['tags']) as $t) {
         $stats[$t] ??= ['total' => 0, 'subscribed' => 0, 'unsubscribed' => 0, 'other' => 0];
         $stats[$t]['total']++;
-        $k = in_array($r['status'], ['subscribed', 'unsubscribed'], true) ? $r['status'] : 'other';
+        // Quien se dio de baja de ESTE listado cuenta como baja aunque siga recibiendo otros
+        $k = $r['status'] === 'subscribed' && in_array((string)$t, $off, true) ? 'unsubscribed'
+            : (in_array($r['status'], ['subscribed', 'unsubscribed'], true) ? $r['status'] : 'other');
         $stats[$t][$k]++;
     }
 }
@@ -62,7 +65,7 @@ layout_start('Etiquetas', 'tags'); ?>
   <?php if (!$stats): ?><tr><td colspan="7" class="empty"><?= $q !== '' ? 'Ninguna etiqueta contiene «' . e($q) . '».' : 'Todavía no hay etiquetas. Se añaden al importar contactos, al editarlos o desde la barra de acciones del listado de contactos.' ?></td></tr><?php endif ?>
   </tbody>
 </table></div>
-<p class="muted">Pulse una etiqueta para ver sus contactos. «Otros» son los pendientes de confirmar y los rebotados.<?= $untagged ? " Hay <b>$untagged</b> contacto(s) sin ninguna etiqueta." : '' ?></p>
+<p class="muted">Pulse una etiqueta para ver sus contactos. «Bajas» incluye a quien se dio de baja de todo y a quien se dio de baja solo de ese listado; «Otros» son los pendientes de confirmar y los rebotados.<?= $untagged ? " Hay <b>$untagged</b> contacto(s) sin ninguna etiqueta." : '' ?></p>
 <dialog id="dlg-tagimport">
   <form method="post" action="index.php?p=contacts&a=import" enctype="multipart/form-data" class="form">
     <?= csrf_field() ?><input type="hidden" name="from" value="tags">

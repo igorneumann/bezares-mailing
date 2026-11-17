@@ -64,6 +64,13 @@ function tr(string $key, string $lang): string
         'unsub_bad' => ['El enlace no es válido o ya no existe. Si desea dejar de recibir nuestros correos, responda a cualquiera de ellos indicándolo.', 'The link is not valid or no longer exists. If you no longer wish to receive our emails, please reply to any of them to let us know.'],
         'unsub_ask' => ['¿Desea que %s deje de recibir nuestros correos?', 'Do you want %s to stop receiving our emails?'],
         'unsub_yes' => ['Sí, darme de baja', 'Yes, unsubscribe me'],
+        'unsub_list_ask' => ['¿Desea que %1$s deje de recibir los correos de «%2$s»? Seguirá recibiendo el resto de nuestras comunicaciones.', 'Do you want %1$s to stop receiving the «%2$s» emails? You will keep receiving our other communications.'],
+        'unsub_list_yes' => ['Darme de baja de «%s»', 'Unsubscribe me from «%s»'],
+        'unsub_all_yes' => ['Darme de baja de todas las comunicaciones', 'Unsubscribe me from all communications'],
+        'unsub_list_done' => ['%1$s ya no recibirá los correos de «%2$s». Seguirá recibiendo otras comunicaciones de %3$s.', '%1$s will no longer receive the «%2$s» emails. You will keep receiving other communications from %3$s.'],
+        'unsub_list_already' => ['%1$s ya se había dado de baja de «%2$s».', '%1$s had already unsubscribed from «%2$s».'],
+        'unsub_all_hint' => ['¿Prefiere no recibir nada de %s?', 'Would you rather receive nothing from %s?'],
+        'resub_list_mistake' => ['Me he dado de baja por error: volver a recibir «%s»', 'I unsubscribed by mistake: receive «%s» again'],
         'unsub_done_t' => ['Baja confirmada', 'Unsubscribed'],
         'unsub_done' => ['%s ya no recibirá más correos nuestros.', '%s will no longer receive our emails.'],
         'unsub_already' => ['%s ya está dado de baja.', '%s is already unsubscribed.'],
@@ -292,7 +299,8 @@ function render_email(array $email, array $contact, array $ctx = []): array
     $color = brand_color();
     $qid = $ctx['queue_id'] ?? null;
     $lang = lang_of($email['lang'] ?? 'es');
-    $unsub = base_url() . '/u.php?c=' . rawurlencode($contact['token']) . ($lang === 'en' ? '&lang=en' : '');
+    // El enlace de baja lleva el mensaje (m): así la baja es solo del listado al que se envió ese correo
+    $unsub = base_url() . '/u.php?c=' . rawurlencode($contact['token']) . ($qid ? '&m=' . (int)$qid : '') . ($lang === 'en' ? '&lang=en' : '');
     $view = $qid ? base_url() . '/v.php?q=' . $qid . '&h=' . sign('v' . $qid) : '#';
 
     $survey = $email['survey_id'] ? one('SELECT * FROM surveys WHERE id = ?', [$email['survey_id']]) : null;
@@ -430,11 +438,13 @@ function process_queue(?int $max = null): array
         $id = (int)$row['id'];
         // Reserva la fila para que dos procesos (cron y navegador) no envíen el mismo correo
         if (q("UPDATE queue SET status = 'sending', sent_at = ? WHERE id = ? AND status = 'pending'", [now(), $id])->rowCount() !== 1) continue;
-        $item = one('SELECT * FROM queue WHERE id = ?', [$id]);
+        $item = one('SELECT q.*, s.tag FROM queue q LEFT JOIN sends s ON s.id = q.send_id WHERE q.id = ?', [$id]);
         $contact = one('SELECT * FROM contacts WHERE id = ?', [$item['contact_id']]);
         $email = $emails[$item['email_id']] ??= one('SELECT * FROM emails WHERE id = ?', [$item['email_id']]);
-        if (!$contact || !$email || $contact['status'] !== 'subscribed') {
-            q("UPDATE queue SET status = 'skipped', error = ? WHERE id = ?", ['Contacto dado de baja o eliminado', $id]);
+        // Se comprueba justo antes de enviar: baja general, baja de ESTE listado o contacto eliminado
+        if (!$contact || !$email || !can_receive($contact, (string)($item['tag'] ?? ''))) {
+            $why = !$contact ? 'Contacto eliminado' : ($contact['status'] !== 'subscribed' ? 'Contacto dado de baja' : 'Baja del listado ' . $item['tag']);
+            q("UPDATE queue SET status = 'skipped', error = ? WHERE id = ?", [$why, $id]);
             continue;
         }
         try {
@@ -695,8 +705,10 @@ function confirmation_redeem(string $raw): ?array
     if (q('DELETE FROM confirmations WHERE id = ?', [$c['id']])->rowCount() !== 1) return null;
     q('DELETE FROM confirmations WHERE contact_id = ?', [$contact['id']]);
     $data = json_decode((string)$c['data'], true) ?: [];
-    q("UPDATE contacts SET status = 'subscribed', unsub_at = NULL, nombre = ?, apellidos = ?, empresa = ?, tags = ? WHERE id = ?", [
+    $confirmed = tags_list((string)$c['tags']);
+    q("UPDATE contacts SET status = 'subscribed', unsub_at = NULL, nombre = ?, apellidos = ?, empresa = ?, tags = ?, unsub_tags = ? WHERE id = ?", [
         $contact['nombre'] ?: (string)($data['nombre'] ?? ''), $contact['apellidos'] ?: (string)($data['apellidos'] ?? ''),
-        $contact['empresa'] ?: (string)($data['empresa'] ?? ''), tags_pack(array_merge(tags_list($contact['tags']), tags_list((string)$c['tags']))), $contact['id']]);
+        $contact['empresa'] ?: (string)($data['empresa'] ?? ''), tags_pack(array_merge(tags_list($contact['tags']), $confirmed)),
+        tags_pack(array_diff(optouts($contact), $confirmed)), $contact['id']]); // volver a pedir un listado anula su baja
     return one('SELECT * FROM contacts WHERE id = ?', [$contact['id']]);
 }

@@ -17,7 +17,7 @@ function seed_defaults(string $adminEmail, string $baseUrl = ''): void
         'social_youtube' => 'https://www.youtube.com/channel/UCdQyMj7T-kc2sKd-71_CZug',
     ];
     foreach ($settings as $k => $v) set_setting($k, $v);
-    set_setting('schema', '6');
+    set_setting('schema', '7');
 
     // Encuesta NPS (basada en survey.bezares.com/285343)
     $sid = insert('INSERT INTO surveys (slug, title, description, thanks, max_per_contact, active, is_public, created_at) VALUES (?,?,?,?,?,?,?,?)',

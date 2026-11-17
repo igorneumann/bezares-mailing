@@ -67,13 +67,14 @@ function schema_sql(string $driver): array
         "contacts (id $pk, email VARCHAR(190) NOT NULL UNIQUE, nombre VARCHAR(190) NOT NULL DEFAULT '',
             apellidos VARCHAR(190) NOT NULL DEFAULT '', empresa VARCHAR(190) NOT NULL DEFAULT '',
             tags VARCHAR(500) NOT NULL DEFAULT '', status VARCHAR(20) NOT NULL DEFAULT 'subscribed',
-            token VARCHAR(40) NOT NULL, created_at VARCHAR(19) NOT NULL, unsub_at VARCHAR(19))",
+            token VARCHAR(40) NOT NULL, created_at VARCHAR(19) NOT NULL, unsub_at VARCHAR(19),
+            unsub_tags VARCHAR(500) NOT NULL DEFAULT '')",
         "emails (id $pk, name VARCHAR(190) NOT NULL, subject VARCHAR(255) NOT NULL DEFAULT '',
             preheader VARCHAR(255) NOT NULL DEFAULT '', theme VARCHAR(60) NOT NULL DEFAULT 'comunicado',
             header_image VARCHAR(500) NOT NULL DEFAULT '',
             body MEDIUMTEXT, attachments TEXT, lang VARCHAR(5) NOT NULL DEFAULT 'es', survey_id INT, created_at VARCHAR(19) NOT NULL, updated_at VARCHAR(19) NOT NULL)",
         "sends (id $pk, email_id INT NOT NULL, segment VARCHAR(190) NOT NULL DEFAULT '', total INT NOT NULL DEFAULT 0,
-            created_at VARCHAR(19) NOT NULL)",
+            created_at VARCHAR(19) NOT NULL, tag VARCHAR(190) NOT NULL DEFAULT '')",
         "queue (id $pk, send_id INT NOT NULL, email_id INT NOT NULL, contact_id INT NOT NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'pending', error VARCHAR(500), sent_at VARCHAR(19), opened_at VARCHAR(19))",
         "surveys (id $pk, slug VARCHAR(80) NOT NULL UNIQUE, title VARCHAR(255) NOT NULL, description TEXT,
@@ -222,6 +223,22 @@ function tags_pack($tags): string
     return $out ? ',' . implode(',', array_keys($out)) . ',' : '';
 }
 function tags_list(string $packed): array { return $packed === '' ? [] : explode(',', trim($packed, ',')); }
+/** Listados (etiquetas) de los que el contacto se ha dado de baja. */
+function optouts(array $contact): array { return tags_list((string)($contact['unsub_tags'] ?? '')); }
+/** ¿Puede recibir un envío dirigido a la etiqueta $tag? ('' = envío a todos los suscritos) */
+function can_receive(array $contact, string $tag): bool
+{
+    if (($contact['status'] ?? '') !== 'subscribed') return false;
+    return $tag === '' || !in_array(mb_strtolower($tag), optouts($contact), true);
+}
+/** Condición SQL: contactos que tienen la etiqueta y NO se han dado de baja de ella. Devuelve [sql, params]. */
+function tag_audience_sql(string $tag, string $alias = ''): array
+{
+    $a = $alias !== '' ? $alias . '.' : '';
+    $t = '%,' . mb_strtolower($tag) . ',%';
+    return ["{$a}tags LIKE ? AND {$a}unsub_tags NOT LIKE ?", [$t, $t]];
+}
+
 function all_tags(): array
 {
     $n = [];

@@ -9,8 +9,15 @@ function contact_where(): array
         $w[] = '(email LIKE ? OR nombre LIKE ? OR apellidos LIKE ? OR empresa LIKE ?)';
         array_push($p, "%$s%", "%$s%", "%$s%", "%$s%");
     }
-    if (($t = trim((string)($_GET['tag'] ?? ''))) !== '') { $w[] = 'tags LIKE ?'; $p[] = '%,' . mb_strtolower($t) . ',%'; }
-    if (($st = (string)($_GET['status'] ?? '')) !== '') { $w[] = 'status = ?'; $p[] = $st; }
+    $t = mb_strtolower(trim((string)($_GET['tag'] ?? '')));
+    $st = (string)($_GET['status'] ?? '');
+    if ($t !== '') { $w[] = 'tags LIKE ?'; $p[] = '%,' . $t . ',%'; }
+    if ($t !== '' && $st === 'subscribed') {
+        // Con etiqueta: «suscritos» son los que reciben ese listado y «bajas» incluye a quien se dio de baja de él
+        $w[] = "status = 'subscribed' AND unsub_tags NOT LIKE ?"; $p[] = '%,' . $t . ',%';
+    } elseif ($t !== '' && $st === 'unsubscribed') {
+        $w[] = "(status = 'unsubscribed' OR unsub_tags LIKE ?)"; $p[] = '%,' . $t . ',%';
+    } elseif ($st !== '') { $w[] = 'status = ?'; $p[] = $st; }
     return [implode(' AND ', $w), $p];
 }
 function norm_header(string $h): string
@@ -23,9 +30,9 @@ function norm_header(string $h): string
 /* ---------- Exportar ---------- */
 if ($a === 'export') {
     [$w, $p] = contact_where();
-    $rows = [['email', 'nombre', 'apellidos', 'empresa', 'etiquetas', 'estado', 'alta']];
+    $rows = [['email', 'nombre', 'apellidos', 'empresa', 'etiquetas', 'estado', 'bajas de listados', 'alta']];
     foreach (all("SELECT * FROM contacts WHERE $w ORDER BY email", $p) as $c)
-        $rows[] = [$c['email'], $c['nombre'], $c['apellidos'], $c['empresa'], implode(', ', tags_list($c['tags'])), $STATUS[$c['status']] ?? $c['status'], $c['created_at']];
+        $rows[] = [$c['email'], $c['nombre'], $c['apellidos'], $c['empresa'], implode(', ', tags_list($c['tags'])), $STATUS[$c['status']] ?? $c['status'], implode(', ', optouts($c)), $c['created_at']];
     $slug = trim(preg_replace('/[^a-z0-9]+/', '-', strtr(mb_strtolower((string)($_GET['tag'] ?? '')), ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n'])), '-');
     download_table($rows, 'contactos-' . ($slug !== '' ? $slug . '-' : '') . date('Ymd'), ($_GET['format'] ?? 'csv') === 'xlsx' ? 'xlsx' : 'csv');
 }
@@ -245,16 +252,18 @@ if ($a === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($dup) flash('Ya existe un contacto con ese correo.', 'err');
     else {
         $d = [$email, trim($_POST['nombre'] ?? ''), trim($_POST['apellidos'] ?? ''), trim($_POST['empresa'] ?? ''), tags_pack($_POST['tags'] ?? ''), $st];
+        $optouts = tags_pack((string)($_POST['unsub_tags'] ?? ''));
         if ($id) {
             $prev = (string)val('SELECT status FROM contacts WHERE id = ?', [$id]);
             q('UPDATE contacts SET email=?, nombre=?, apellidos=?, empresa=?, tags=?, status=? WHERE id=?', [...$d, $id]);
+            q('UPDATE contacts SET unsub_tags = ? WHERE id = ?', [$optouts, $id]);
             if ($st !== 'subscribed' && $st !== 'pending' && $prev !== $st) {
                 // Baja o rebote marcados a mano: se anotan y se anulan los enlaces de confirmación pendientes
                 q('UPDATE contacts SET unsub_at = ? WHERE id = ?', [now(), $id]);
                 q('DELETE FROM confirmations WHERE contact_id = ?', [$id]);
             }
         }
-        else q('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at) VALUES (?,?,?,?,?,?,?,?)', [...$d, token(), now()]);
+        else q('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at, unsub_tags) VALUES (?,?,?,?,?,?,?,?,?)', [...$d, token(), now(), $optouts]);
         flash('Contacto guardado.');
         redirect('index.php?p=contacts');
     }
@@ -328,6 +337,8 @@ if ($a === 'edit') {
       </div>
       <label>Empresa<input name="empresa" value="<?= e($c['empresa']) ?>"></label>
       <label>Etiquetas (separadas por comas)<input name="tags" value="<?= e(implode(', ', tags_list($c['tags']))) ?>" placeholder="clientes, distribuidores"></label>
+      <label>Bajas de listados: no recibe los envíos a estas etiquetas<input name="unsub_tags" value="<?= e(implode(', ', optouts($c))) ?>" placeholder="newsletter-es"></label>
+      <p class="muted" style="margin-top:-.5rem">Se rellena solo cuando el contacto pulsa «darse de baja» en un correo enviado a una etiqueta. Quítela solo si el contacto le ha pedido volver a recibir ese listado.</p>
       <label>Estado<select name="status"><?php foreach ($STATUS as $k => $l): ?><option value="<?= $k ?>" <?= $c['status'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach ?></select></label>
       <button class="btn primary">Guardar</button>
     </form>
@@ -395,7 +406,7 @@ layout_start('Contactos', 'contacts'); ?>
       <td><a href="index.php?p=contacts&a=edit&id=<?= $c['id'] ?>"><?= e($c['email']) ?></a></td>
       <td><?= e(trim($c['nombre'] . ' ' . $c['apellidos'])) ?></td>
       <td><?= e($c['empresa']) ?></td>
-      <td><?php foreach (tags_list($c['tags']) as $t): ?><span class="tag"><?= e($t) ?></span><?php endforeach ?></td>
+      <td><?php $off = optouts($c); foreach (tags_list($c['tags']) as $t): $isOff = in_array($t, $off, true); ?><span class="tag<?= $isOff ? ' off' : '' ?>"<?= $isOff ? ' title="Se dio de baja de este listado"' : '' ?>><?= e($t) ?></span><?php endforeach ?></td>
       <td><span class="pill <?= e($c['status']) ?>"><?= e($STATUS[$c['status']] ?? $c['status']) ?></span></td>
       <td class="muted"><?= e(date('d/m/Y', strtotime($c['created_at']))) ?></td>
     </tr>

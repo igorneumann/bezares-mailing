@@ -7,7 +7,7 @@ $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 function audience_sql(array $email, array $o): array
 {
     $w = ["c.status = 'subscribed'"]; $p = [];
-    if (($o['tag'] ?? '') !== '') { $w[] = 'c.tags LIKE ?'; $p[] = '%,' . mb_strtolower($o['tag']) . ',%'; }
+    if (($o['tag'] ?? '') !== '') { [$tw, $tp] = tag_audience_sql($o['tag'], 'c'); $w[] = $tw; array_push($p, ...$tp); } // sin quienes se dieron de baja de ese listado
     if (!empty($o['skip_sent'])) {
         $w[] = "c.id NOT IN (SELECT contact_id FROM queue WHERE email_id = ? AND status IN ('sent','pending','sending'))";
         $p[] = $email['id'];
@@ -113,7 +113,7 @@ if ($a === 'queue' && $isPost && $email) {
     $ids = array_column(all("SELECT c.id FROM contacts c WHERE $w ORDER BY c.id", $p), 'id');
     if (!$ids) { flash('No hay destinatarios para ese envío.', 'err'); redirect('index.php?p=emails&a=send&id=' . $id); }
     db()->beginTransaction();
-    $sendId = insert('INSERT INTO sends (email_id, segment, total, created_at) VALUES (?,?,?,?)', [$id, $o['tag'] ?: 'Todos los suscritos', count($ids), now()]);
+    $sendId = insert('INSERT INTO sends (email_id, segment, total, created_at, tag) VALUES (?,?,?,?,?)', [$id, $o['tag'] ?: 'Todos los suscritos', count($ids), now(), mb_strtolower($o['tag'])]);
     $st = db()->prepare("INSERT INTO queue (send_id, email_id, contact_id, status) VALUES (?, ?, ?, 'pending')");
     foreach ($ids as $cid) $st->execute([$sendId, $id, $cid]);
     db()->commit();
@@ -144,15 +144,17 @@ if ($a === 'progress') {
 /* ---------- Estadísticas del correo: quién lo ha recibido y quién lo ha abierto ---------- */
 if (($a === 'stats' || $a === 'statsexport') && $email) {
     $QS = ['sent' => 'Enviado', 'failed' => 'Fallido', 'pending' => 'En cola', 'sending' => 'En cola', 'skipped' => 'Omitido'];
-    $all = all("SELECT q.id, q.status, q.error, q.sent_at, q.opened_at, q.send_id, c.email, c.nombre, c.apellidos, c.empresa, c.status cstatus
-        FROM queue q LEFT JOIN contacts c ON c.id = q.contact_id WHERE q.email_id = ? ORDER BY q.id DESC", [$id]);
+    $all = all("SELECT q.id, q.status, q.error, q.sent_at, q.opened_at, q.send_id, c.email, c.nombre, c.apellidos, c.empresa, c.status cstatus, c.unsub_tags, s.tag stag
+        FROM queue q LEFT JOIN contacts c ON c.id = q.contact_id LEFT JOIN sends s ON s.id = q.send_id WHERE q.email_id = ? ORDER BY q.id DESC", [$id]);
     $answered = [];
     if ($email['survey_id']) foreach (all('SELECT email, MIN(created_at) d FROM responses WHERE survey_id = ? GROUP BY email', [$email['survey_id']]) as $r) $answered[$r['email']] = $r['d'];
     $n = ['sent' => 0, 'opened' => 0, 'failed' => 0, 'pending' => 0, 'skipped' => 0, 'answered' => 0, 'unsub' => 0];
     foreach ($all as &$r) {
         $r['opened'] = $r['status'] === 'sent' && $r['opened_at'];
         $r['answered'] = $r['status'] === 'sent' && isset($answered[$r['email'] ?? '']) ? $answered[$r['email']] : '';
-        if ($r['status'] === 'sent') { $n['sent']++; if ($r['opened']) $n['opened']++; if ($r['answered']) $n['answered']++; if ($r['cstatus'] === 'unsubscribed') $n['unsub']++; }
+        // Baja de este envío: general, o solo del listado al que se envió
+        $r['listoff'] = $r['cstatus'] === 'subscribed' && (string)$r['stag'] !== '' && in_array((string)$r['stag'], tags_list((string)$r['unsub_tags']), true);
+        if ($r['status'] === 'sent') { $n['sent']++; if ($r['opened']) $n['opened']++; if ($r['answered']) $n['answered']++; if ($r['cstatus'] === 'unsubscribed' || $r['listoff']) $n['unsub']++; }
         elseif ($r['status'] === 'failed') $n['failed']++;
         elseif ($r['status'] === 'skipped') $n['skipped']++;
         else $n['pending']++;
@@ -204,7 +206,7 @@ if (($a === 'stats' || $a === 'statsexport') && $email) {
       <div class="card kpi"><span>Sin abrir</span><b><?= $n['sent'] - $n['opened'] ?> <small><?= $pct($n['sent'] - $n['opened'], $n['sent']) ?></small></b></div>
       <div class="card kpi"><span>Fallido<?= $n['pending'] ? ' · En cola' : '' ?></span><b><?= $n['failed'] ?><?= $n['pending'] ? ' · ' . $n['pending'] : '' ?></b></div>
       <?php if ($email['survey_id']): ?><div class="card kpi"><span>Respondió la encuesta</span><b><?= $n['answered'] ?> <small><?= $pct($n['answered'], $n['sent']) ?></small></b></div><?php endif ?>
-      <div class="card kpi"><span>Se dio de baja después</span><b><?= $n['unsub'] ?></b></div>
+      <div class="card kpi"><span>Se dio de baja después (de todo o de este listado)</span><b><?= $n['unsub'] ?></b></div>
     </div>
     <form class="filters" method="get">
       <input type="hidden" name="p" value="emails"><input type="hidden" name="a" value="stats"><input type="hidden" name="id" value="<?= $id ?>"><input type="hidden" name="v" value="<?= e($view) ?>">
@@ -219,7 +221,7 @@ if (($a === 'stats' || $a === 'statsexport') && $email) {
         <tr>
           <td><?= $r['email'] !== null ? e($r['email']) : '<span class="muted">(contacto eliminado)</span>' ?>
             <?php if (trim($r['nombre'] . $r['apellidos']) !== ''): ?><br><span class="muted"><?= e(trim($r['nombre'] . ' ' . $r['apellidos'])) ?></span><?php endif ?>
-            <?php if ($r['cstatus'] === 'unsubscribed'): ?> <span class="pill unsubscribed">Baja</span><?php endif ?></td>
+            <?php if ($r['cstatus'] === 'unsubscribed'): ?> <span class="pill unsubscribed">Baja</span><?php elseif ($r['listoff']): ?> <span class="pill unsubscribed" title="Se dio de baja solo de este listado">Baja de «<?= e($r['stag']) ?>»</span><?php endif ?></td>
           <td><?= e($r['empresa']) ?></td>
           <td><?php if ($r['status'] === 'sent'): ?><span class="pill subscribed">✓ Recibido</span> <span class="muted nowrap"><?= fecha($r['sent_at']) ?></span>
               <?php elseif ($r['status'] === 'failed'): ?><span class="pill unsubscribed">✗ Fallido</span><br><span class="muted"><?= e($r['error']) ?></span>
@@ -273,7 +275,7 @@ if ($a === 'send' && $email) {
           <label class="check"><input type="checkbox" name="skip_sent" checked> No reenviar a quien ya recibió este correo</label>
           <?php if ($email['survey_id']): ?><label class="check"><input type="checkbox" name="skip_answered" checked> Excluir a quien ya respondió la encuesta</label><?php endif ?>
           <?php if ($att = email_attachments($email)): ?><p class="muted">Adjuntos: <b><?= e(implode(', ', $att)) ?></b> (<?= media_size(array_sum(array_map(fn($n) => filesize(media_dir() . '/' . $n), $att))) ?>).</p><?php endif ?>
-          <p class="muted">Los contactos dados de baja nunca reciben correos.</p>
+          <p class="muted">Los contactos dados de baja nunca reciben correos. Al enviar a una etiqueta, se excluye a quien se dio de baja de ella y el enlace de baja del correo da de baja <b>solo de esa etiqueta</b>; al enviar a «Todos los suscritos», el enlace da de baja de todo.<?php $nOff = (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'subscribed' AND unsub_tags <> ''"); if ($nOff): ?> <?= $nOff ?> contacto(s) se han dado de baja de algún listado: sí recibirán un envío a «Todos los suscritos».<?php endif ?></p>
           <button class="btn primary" <?= $ready ? '' : 'disabled' ?>>Enviar ahora</button>
         </form>
         <?php if ($history): ?>
