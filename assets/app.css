@@ -233,3 +233,14 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 .bulkbar input[name=bulk_tags]{flex:1;min-width:220px;padding:.35rem .6rem}
 .bulkbar .bulkcount{font-size:.9rem;color:var(--muted)}.bulkbar.active .bulkcount{color:var(--brand)}
 .bulkbar label.check{font-size:.85rem;margin:0}
+
+/* Pestaña Etiquetas */
+.tagtable tr[data-href]{cursor:pointer}.tagtable tr[data-href]:hover td{background:#eaf5fb}
+.tagtable th a{color:inherit;text-decoration:none}.tagtable th a.cur{color:var(--brand)}
+.tag.big{font-size:.88rem;padding:.15rem .7rem}
+.tagtable .barcol{width:28%}.tagtable .track{display:block;height:10px;background:#e9eef2;border-radius:5px;overflow:hidden}
+.tagtable .track i{display:block;height:100%;background:var(--sky);border-radius:5px}
+.tagtable td{vertical-align:middle}
+
+.tagactions{text-align:right}.tagactions .btn{margin-left:.15rem}
+.tagtable .barcol{width:22%}

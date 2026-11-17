@@ -26,7 +26,8 @@ if ($a === 'export') {
     $rows = [['email', 'nombre', 'apellidos', 'empresa', 'etiquetas', 'estado', 'alta']];
     foreach (all("SELECT * FROM contacts WHERE $w ORDER BY email", $p) as $c)
         $rows[] = [$c['email'], $c['nombre'], $c['apellidos'], $c['empresa'], implode(', ', tags_list($c['tags'])), $STATUS[$c['status']] ?? $c['status'], $c['created_at']];
-    download_table($rows, 'contactos-' . date('Ymd'), ($_GET['format'] ?? 'csv') === 'xlsx' ? 'xlsx' : 'csv');
+    $slug = trim(preg_replace('/[^a-z0-9]+/', '-', strtr(mb_strtolower((string)($_GET['tag'] ?? '')), ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n'])), '-');
+    download_table($rows, 'contactos-' . ($slug !== '' ? $slug . '-' : '') . date('Ymd'), ($_GET['format'] ?? 'csv') === 'xlsx' ? 'xlsx' : 'csv');
 }
 
 /* ---------- Importar (2 pasos: subir archivo → revisar columnas → importar) ---------- */
@@ -98,11 +99,12 @@ if ($a === 'import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach (table_rows(data_dir() . '/' . $name) as $_) $n++;
         if (!$n) throw new RuntimeException('El archivo está vacío.');
         $_SESSION['import']['rows'] = $n;
+        $_SESSION['import']['tag'] = trim(tags_pack((string)($_POST['preset_tag'] ?? '')), ',');
         redirect('index.php?p=contacts&a=map');
     } catch (Throwable $e) {
         import_clear();
         flash($e->getMessage(), 'err');
-        redirect('index.php?p=contacts');
+        redirect(($_POST['from'] ?? '') === 'tags' ? 'index.php?p=tags' : 'index.php?p=contacts');
     }
 }
 if ($a === 'cancelimport') { import_clear(); redirect('index.php?p=contacts'); }
@@ -160,7 +162,7 @@ if ($a === 'map') {
       </tbody>
     </table></div>
     <div class="card form">
-      <label>Añadir estas etiquetas a todos los importados<input name="tags" placeholder="mautic, clientes"></label>
+      <label>Añadir estas etiquetas a todos los importados<input name="tags" placeholder="mautic, clientes" value="<?= e(implode(', ', tags_list(',' . ($_SESSION['import']['tag'] ?? '') . ','))) ?>"></label>
       <label class="check"><input type="checkbox" name="update" checked> Actualizar nombre, empresa y etiquetas de los contactos que ya existan</label>
       <p class="muted">Una baja nunca se reactiva al importar. Y si el archivo marca «no enviar correos» a un contacto que ya existe, se le da de baja también aquí.</p>
     </div>
@@ -220,10 +222,12 @@ if ($a === 'doimport' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             } else $n['same']++;
         }
         db()->commit();
+        $preset = tags_list(',' . ($_SESSION['import']['tag'] ?? '') . ',');
         import_clear();
         flash("Importación terminada: {$n['new']} nuevos, {$n['upd']} actualizados, {$n['same']} ya existentes sin cambios, {$n['dnc']} marcados como baja (no enviar correos), "
             . "{$n['dup']} repetidos en el archivo, {$n['bad']} con correo no válido.");
-        redirect('index.php?p=contacts');
+        // Si se importó desde una etiqueta, se muestran los contactos de esa etiqueta
+        redirect('index.php?p=contacts' . ($preset ? '&tag=' . rawurlencode($preset[0]) : ''));
     } catch (Throwable $e) {
         if (db()->inTransaction()) db()->rollBack();
         flash($e->getMessage(), 'err');

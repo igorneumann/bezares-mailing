@@ -247,7 +247,7 @@ function brand_color(): string
 
 /* ---------- Preferencias del panel ---------- */
 
-const ADMIN_TABS = ['contacts' => 'Contactos', 'emails' => 'Correos', 'media' => 'Biblioteca', 'surveys' => 'Encuestas', 'auto' => 'Automatización', 'settings' => 'Ajustes'];
+const ADMIN_TABS = ['contacts' => 'Contactos', 'tags' => 'Etiquetas', 'emails' => 'Correos', 'media' => 'Biblioteca', 'surveys' => 'Encuestas', 'auto' => 'Automatización', 'settings' => 'Ajustes'];
 const PER_PAGE_OPTIONS = [25, 50, 100, 250, 500, 1000, 0]; // 0 = todos
 
 function default_tab(): string

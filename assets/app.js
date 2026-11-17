@@ -19,6 +19,18 @@
     const t = b.textContent; b.textContent = 'Copiada ✓'; setTimeout(() => { b.textContent = t; }, 1500);
   }));
 
+  /* Filas que llevan a otra página al pulsarlas (pestaña Etiquetas) */
+  $$('tr[data-href]').forEach(tr => tr.addEventListener('click', e => { if (!e.target.closest('a,button,input,form')) location.href = tr.dataset.href; }));
+  /* Importar a una etiqueta concreta (pestaña Etiquetas) */
+  const ti = $('#dlg-tagimport');
+  if (ti) $$('[data-import-tag]').forEach(b => b.addEventListener('click', () => {
+    const tag = b.dataset.importTag, input = $('[name=preset_tag]', ti);
+    input.value = tag;
+    $('[data-import-title]', ti).textContent = tag ? 'Importar contactos a «' + tag + '»' : 'Importar contactos a una etiqueta nueva';
+    ti.showModal();
+    (tag ? $('[name=file]', ti) : input).focus();
+  }));
+
   /* ---------- Acciones masivas en el listado de contactos ---------- */
   const bulk = $('#bulkform');
   if (bulk) {

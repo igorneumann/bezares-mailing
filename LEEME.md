@@ -22,6 +22,9 @@ Si el servidor es Nginx (no Apache), los `.htaccess` no se aplican: añada las r
 - **Contactos**: alta manual, importación y exportación en CSV o Excel (.xlsx), etiquetas y estado.
   La importación acepta directamente la exportación de Mautic (`email`, `firstname`, `lastname`, `company`, `tags`,
   y la columna de «no enviar correos / Do Not Contact», que se importa como baja) y deja revisar las columnas antes de importar.
+- **Etiquetas**: todas las etiquetas con cuántos contactos tiene cada una (suscritos, bajas, otros). Al pulsar una se
+  abre Contactos filtrado por ella. Cada etiqueta tiene botones para importar contactos directamente a ella y para
+  exportar sus contactos en CSV o Excel.
 - **Correos**: editor con temas. Campos disponibles: `{{nombre}}`, `{{apellidos}}`, `{{empresa}}`,
   `{{email}}`, `{{encuesta}}`, `{{encuesta_url}}`, `{{baja_url}}`. El pie con el enlace de baja
   se añade siempre.
