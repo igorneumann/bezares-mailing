@@ -1,16 +1,38 @@
 <?php
+/* Acceso al panel. Límites contra fuerza bruta:
+   - por cuenta (la dirección escrita, exista o no): tras 5 fallos en una hora, bloqueo progresivo 1, 2, 4, 8… hasta 60 minutos;
+   - por IP: 20 fallos en 15 minutos o 100 en un día bloquean esa IP.
+   La contraseña se comprueba siempre con el mismo coste para no revelar qué cuentas existen. */
 $err = '';
+$ip = client_ip();
+$lockMsg = fn(int $s) => 'Demasiados intentos fallidos. Espere ' . max(1, (int)ceil($s / 60)) . ' minuto(s) e inténtelo de nuevo.';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
-    $u = one('SELECT * FROM users WHERE email = ?', [norm_email($_POST['email'] ?? '')]);
-    if ($u && password_verify((string)($_POST['pass'] ?? ''), $u['pass_hash'])) {
-        session_regenerate_id(true);
-        $_SESSION['uid'] = $u['id'];
-        if (!empty($_POST['remember'])) remember_set($u); else remember_clear();
-        redirect('index.php');
+    $email = norm_email((string)($_POST['email'] ?? ''));
+    $acct = 'login-acct:' . hash('sha256', $email);
+    $ipKey = 'login-ip:' . $ip;
+    $fails = throttle_count($acct, 3600);
+    $wait = 0;
+    if ($fails >= 5) $wait = max(0, throttle_last($acct) + min(3600, 60 * (2 ** min(6, $fails - 5))) - time());
+    if (!throttle_ok($ipKey, 20, 900) || !throttle_ok($ipKey, 100, 86400)) $wait = max($wait, 900);
+    if ($wait > 0) {
+        $err = $lockMsg($wait);
+    } else {
+        $u = $email !== '' ? one('SELECT * FROM users WHERE email = ?', [$email]) : null;
+        // Mismo trabajo exista o no la cuenta
+        $ok = password_verify((string)($_POST['pass'] ?? ''), $u['pass_hash'] ?? '$2y$10$ye7XXaUNHN2gv2f57GZNE.xDbMpSdEjyziXmn2dIf4A3mVyECrY8y');
+        if ($u && $ok) {
+            throttle_clear($acct);
+            session_regenerate_id(true);
+            $_SESSION['uid'] = $u['id'];
+            if (!empty($_POST['remember'])) remember_set($u); else remember_clear();
+            redirect('index.php');
+        }
+        throttle_hit($acct);
+        throttle_hit($ipKey);
+        usleep(random_int(300000, 800000));
+        $err = 'Correo o contraseña incorrectos.';
     }
-    sleep(1);
-    $err = 'Correo o contraseña incorrectos.';
 }
 $logo = logo_url();
 ?><!doctype html>

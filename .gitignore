@@ -4,3 +4,4 @@
 /data/import-*
 /uploads/*
 !/uploads/.htaccess
+!/uploads/index.html

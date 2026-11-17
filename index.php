@@ -6,6 +6,8 @@ require __DIR__ . '/lib/mailer.php';
 require __DIR__ . '/lib/media.php';
 require __DIR__ . '/lib/auto.php';
 
+security_headers();
+if (cfg()) { enforce_canonical(); migrate(); }
 start_session();
 
 if (!cfg()) { require __DIR__ . '/pages/install.php'; exit; }
@@ -17,7 +19,6 @@ if ($p === 'logout') { $_SESSION = []; session_destroy(); remember_clear(); redi
 if (empty($_SESSION['uid']) && ($uid = remember_check())) { session_regenerate_id(true); $_SESSION['uid'] = $uid; }
 if (empty($_SESSION['uid'])) { require __DIR__ . '/pages/login.php'; exit; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST') csrf_check();
-migrate();
 
 if (!in_array($p, ['contacts', 'emails', 'media', 'surveys', 'auto', 'settings'], true)) $p = 'contacts';
 try {

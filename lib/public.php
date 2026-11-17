@@ -27,9 +27,14 @@ function public_message(string $title, string $msg, string $kind = 'info', strin
     public_end();
     exit;
 }
-function public_boot(): void
+/** $frame: la página se puede incrustar en un iframe de otra web (formulario de suscripción). */
+function public_boot(bool $frame = false): void
 {
     require_once __DIR__ . '/boot.php';
     require_once __DIR__ . '/mailer.php';
+    require_once __DIR__ . '/media.php';
     if (!cfg()) { http_response_code(503); exit('Aplicación sin instalar.'); }
+    security_headers($frame);
+    enforce_canonical();
+    migrate();
 }

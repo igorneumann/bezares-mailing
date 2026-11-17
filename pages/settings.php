@@ -1,6 +1,6 @@
 <?php
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
-$fields = ['company', 'address', 'color', 'base_url', 'unsub_text', 'from_name', 'from_email', 'reply_to', 'driver',
+$fields = ['company', 'address', 'color', 'unsub_text', 'from_name', 'from_email', 'reply_to', 'driver',
     'smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'batch', 'hourly_limit',
     'social_web', 'social_linkedin', 'social_x', 'social_facebook', 'social_youtube'];
 
@@ -8,6 +8,17 @@ if ($a === 'save' && $isPost) {
     foreach ($fields as $f) if (isset($_POST[$f])) set_setting($f, trim((string)$_POST[$f]));
     if (isset($_POST['smtp_pass'])) set_setting('smtp_pass', (string)$_POST['smtp_pass']);
     $msg = 'Ajustes guardados.';
+    // Dirección de la aplicación: base de todos los enlaces y de las cookies. Se valida antes de guardarla.
+    if (isset($_POST['base_url'])) {
+        $base = rtrim(trim((string)$_POST['base_url']), '/');
+        $bp = parse_url($base);
+        if (filter_var($base, FILTER_VALIDATE_URL) && in_array(strtolower($bp['scheme'] ?? ''), ['http', 'https'], true) && !isset($bp['query']) && !isset($bp['fragment']) && !isset($bp['user'])) {
+            set_setting('base_url', $base);
+        } else $msg .= ' La dirección de la aplicación no se cambió porque no es válida.';
+    }
+    $https = str_starts_with((string)setting('base_url'), 'https://');
+    set_setting('force_https', $https && !empty($_POST['force_https']) ? '1' : '0');
+    if (!empty($_POST['force_https']) && !$https) $msg .= ' «Forzar HTTPS» requiere que la dirección empiece por https://.';
     $f = $_FILES['logo'] ?? null;
     if ($f && $f['error'] === UPLOAD_ERR_OK) {
         $info = @getimagesize($f['tmp_name']);
@@ -24,6 +35,12 @@ if ($a === 'save' && $isPost) {
     }
     flash($msg);
     redirect('index.php?p=settings');
+}
+if ($a === 'selfcheck' && $isPost) {
+    $problems = exposure_check();
+    set_setting('exposure', json_encode(['at' => now(), 'problems' => $problems], JSON_UNESCAPED_UNICODE));
+    flash($problems ? 'Se han encontrado problemas de seguridad en el servidor: revise «Seguridad del servidor».' : 'Comprobación superada: las carpetas internas no son accesibles desde Internet.', $problems ? 'err' : 'ok');
+    redirect('index.php?p=settings#seguridad');
 }
 if ($a === 'test' && $isPost) {
     [$list, $bad] = test_recipients((string)($_POST['to'] ?? ''));
@@ -62,7 +79,9 @@ layout_start('Ajustes', 'settings'); ?>
     </div>
     <?php if (logo_url()): ?><p><img src="<?= e(logo_url()) ?>" alt="Logo actual" style="max-height:60px"></p><?php endif ?>
     <label>Texto de baja (el texto entre [corchetes] será el enlace)<input name="unsub_text" value="<?= $s('unsub_text') ?>"></label>
-    <label>Dirección web de esta aplicación<input name="base_url" value="<?= e(base_url()) ?>"></label>
+    <label>Dirección web de esta aplicación<input type="url" name="base_url" value="<?= e(base_url()) ?>" required></label>
+    <label class="check"><input type="checkbox" name="force_https" <?= setting('force_https') === '1' ? 'checked' : '' ?> <?= str_starts_with(base_url(), 'https://') ? '' : 'disabled' ?>> Forzar HTTPS (redirige http → https y activa HSTS)</label>
+    <?php if (!str_starts_with(base_url(), 'https://')): ?><p class="muted" style="color:#a12626">La dirección usa http: las contraseñas y las cookies viajan sin cifrar. Active un certificado en el hosting y cambie la dirección a https://.</p><?php endif ?>
     <h3>Redes sociales (temas Newsletter y Destacado)</h3>
     <div class="row2">
       <label>Web<input name="social_web" value="<?= $s('social_web') ?>"></label>
@@ -117,5 +136,25 @@ layout_start('Ajustes', 'settings'); ?>
   <h2>Probar el envío</h2>
   <p class="muted">Guarde los ajustes antes de probar.</p>
   <div class="row2"><label>Enviar un correo de prueba a (uno o varios correos separados por comas)<input type="text" name="to" value="<?= e(($_SESSION['test_to'] ?? '') ?: $me) ?>" placeholder="uno@empresa.com, otro@empresa.com" required></label><div class="end"><button class="btn">Enviar prueba</button></div></div>
+</form>
+
+<?php
+$exp = json_decode((string)setting('exposure'), true) ?: null;
+$dataOutside = !str_starts_with((realpath(data_dir()) ?: data_dir()) . DIRECTORY_SEPARATOR, (realpath(ROOT) ?: ROOT) . DIRECTORY_SEPARATOR);
+?>
+<form method="post" action="index.php?p=settings&a=selfcheck" class="card form" id="seguridad">
+  <?= csrf_field() ?>
+  <h2>Seguridad del servidor</h2>
+  <ul class="secstat">
+    <li class="<?= $dataOutside ? 'ok' : 'warn' ?>">Carpeta de datos: <code><?= e(data_dir()) ?></code> <?= $dataOutside ? '(fuera de la carpeta pública)' : '(dentro de la carpeta pública: depende de que el servidor la bloquee)' ?></li>
+    <li class="<?= str_starts_with(base_url(), 'https://') ? 'ok' : 'bad' ?>">Dirección: <code><?= e(base_url()) ?></code><?= setting('force_https') === '1' ? ' · HTTPS forzado' : '' ?></li>
+    <li class="<?= is_https() ? 'ok' : 'warn' ?>">Esta petición ha llegado por <?= is_https() ? 'HTTPS' : 'HTTP' ?><?= trusted_proxies() ? ' · proxies de confianza: ' . e(implode(', ', trusted_proxies())) : '' ?></li>
+    <?php if ($exp): ?>
+      <li class="<?= $exp['problems'] ? 'bad' : 'ok' ?>">Última comprobación desde Internet (<?= fecha($exp['at']) ?>): <?= $exp['problems'] ? 'se encontraron problemas' : 'carpetas internas protegidas' ?>
+        <?php if ($exp['problems']): ?><ul><?php foreach ($exp['problems'] as $pr): ?><li><?= e($pr) ?></li><?php endforeach ?></ul><?php endif ?></li>
+    <?php else: ?><li class="warn">Todavía no se ha comprobado si las carpetas internas son accesibles desde Internet.</li><?php endif ?>
+  </ul>
+  <p class="muted">La comprobación pide por HTTP, a la dirección de la aplicación, un archivo de prueba creado en la carpeta de datos y una plantilla interna. En Nginx hay que añadir las reglas de <code>nginx.conf.example</code>. Detrás de un proxy inverso, indique su IP en <code>data/config.php</code> (<code>'trusted_proxies' => ['IP']</code>) para que se reconozcan el HTTPS y la IP real de los visitantes.</p>
+  <button class="btn">Comprobar ahora</button>
 </form>
 <?php layout_end();

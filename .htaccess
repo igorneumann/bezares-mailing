@@ -1,0 +1,10 @@
+# Archivos de la raíz que no deben servirse
+<FilesMatch "(^\.|\.(md|sqlite|sqlite3|db|bundle|example|log|bak|zip)$)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>

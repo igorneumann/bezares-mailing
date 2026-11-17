@@ -1,0 +1,30 @@
+# Bezares Mailing · reglas para Nginx (los archivos .htaccess solo funcionan en Apache)
+# Copie estos bloques dentro del "server { … }" del sitio. Si la aplicación está en una subcarpeta
+# (por ejemplo /mailing), anteponga esa ruta: ^/mailing/(data|lib|pages|themes)/
+#
+# Después compruébelo desde fuera (debe responder 403 o 404):
+#   curl -I https://su-dominio/data/config.php
+#   curl -I https://su-dominio/themes/comunicado.html
+# y use «Comprobar ahora» en Ajustes → Seguridad del servidor.
+
+# Carpetas internas: configuración, base de datos SQLite, importaciones y código
+location ~ ^/(data|lib|pages|themes)/ {
+    deny all;
+    return 404;
+}
+
+# Biblioteca: nunca ejecutar ni servir scripts
+location ~ ^/uploads/.*\.(php[0-9]?|phtml|phar|pht|cgi|pl|py|sh)$ {
+    deny all;
+    return 404;
+}
+
+# Archivos ocultos (.git, .htaccess…) y archivos de la raíz que no son públicos
+location ~ /\.(?!well-known/) {
+    deny all;
+    return 404;
+}
+location ~ \.(md|sqlite|sqlite3|db|bundle|example|log|bak|zip)$ {
+    deny all;
+    return 404;
+}

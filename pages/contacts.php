@@ -63,12 +63,15 @@ function parse_dnc(string $v): string
 function import_file(): ?string
 {
     $f = $_SESSION['import']['file'] ?? '';
-    $path = ROOT . '/data/' . basename($f);
+    $path = data_dir() . '/' . basename($f);
     return $f !== '' && preg_match('/^import-[a-f0-9]+\.(csv|xlsx)$/', $f) && is_file($path) ? $path : null;
 }
-function import_rows(string $path): array
+/** Primeras $n filas (para la vista previa), sin leer el resto del archivo. */
+function import_head(string $path, int $n): array
 {
-    return str_ends_with($path, '.xlsx') ? xlsx_read($path) : csv_read($path);
+    $out = [];
+    foreach (table_rows($path) as $r) { $out[] = $r; if (count($out) >= $n) break; }
+    return $out;
 }
 function import_clear(): void
 {
@@ -80,17 +83,24 @@ if ($a === 'import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $f = $_FILES['file'] ?? null;
         if (!$f || $f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('No se ha recibido el archivo (puede que supere el tamaño máximo que admite el servidor).');
+        if ($f['size'] > IMPORT_MAX_BYTES) throw new RuntimeException('El archivo supera los 20 MB. Divídalo en varios archivos.');
         $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
         if ($ext === 'xls') throw new RuntimeException('El formato .xls antiguo no está soportado: guarde el archivo como .xlsx o .csv.');
         $ext = $ext === 'xlsx' ? 'xlsx' : 'csv';
         import_clear();
-        foreach (glob(ROOT . '/data/import-*') ?: [] as $old) if (filemtime($old) < time() - 86400) @unlink($old);
+        foreach (glob(data_dir() . '/import-*') ?: [] as $old) if (filemtime($old) < time() - 86400) @unlink($old);
         $name = 'import-' . token(8) . '.' . $ext;
-        if (!move_uploaded_file($f['tmp_name'], ROOT . '/data/' . $name)) throw new RuntimeException('No se pudo guardar el archivo (permisos de la carpeta data).');
+        if (!move_uploaded_file($f['tmp_name'], data_dir() . '/' . $name)) throw new RuntimeException('No se pudo guardar el archivo (permisos de la carpeta de datos).');
         $_SESSION['import'] = ['file' => $name, 'name' => (string)$f['name']];
-        if (!import_rows(ROOT . '/data/' . $name)) { import_clear(); throw new RuntimeException('El archivo está vacío.'); }
+        // Recorrido completo (fila a fila, sin guardar nada) para validar el archivo y contar filas antes de seguir
+        @set_time_limit(120);
+        $n = 0;
+        foreach (table_rows(data_dir() . '/' . $name) as $_) $n++;
+        if (!$n) throw new RuntimeException('El archivo está vacío.');
+        $_SESSION['import']['rows'] = $n;
         redirect('index.php?p=contacts&a=map');
     } catch (Throwable $e) {
+        import_clear();
         flash($e->getMessage(), 'err');
         redirect('index.php?p=contacts');
     }
@@ -100,7 +110,8 @@ if ($a === 'cancelimport') { import_clear(); redirect('index.php?p=contacts'); }
 if ($a === 'map') {
     $path = import_file();
     if (!$path) redirect('index.php?p=contacts');
-    $rows = import_rows($path);
+    $rows = import_head($path, 201);
+    $total = (int)($_SESSION['import']['rows'] ?? count($rows));
     $cols = max(array_map('count', array_slice($rows, 0, 50)));
     $map = [];
     $used = [];
@@ -116,14 +127,20 @@ if ($a === 'map') {
         foreach ($rows[0] as $i => $v) if (str_contains($v, '@')) { $map[$i] = 'email'; break; }
     }
     $data = $header ? array_slice($rows, 1) : $rows;
+    $dataTotal = $header ? $total - 1 : $total;
     $hasDnc = in_array('dnc', $map, true);
     $dncCount = 0;
-    if ($hasDnc) { $di = array_search('dnc', $map, true); foreach ($data as $r) if (parse_dnc((string)($r[$di] ?? '')) !== '') $dncCount++; }
+    if ($hasDnc) {
+        // Recuento de bajas sobre todo el archivo, fila a fila
+        $di = array_search('dnc', $map, true);
+        $first = true;
+        foreach (table_rows($path) as $r) { if ($first && $header) { $first = false; continue; } $first = false; if (parse_dnc((string)($r[$di] ?? '')) !== '') $dncCount++; }
+    }
     layout_start('Importar contactos', 'contacts'); ?>
     <form method="post" action="index.php?p=contacts&a=doimport">
     <?= csrf_field() ?><input type="hidden" name="header" value="<?= $header ? 1 : 0 ?>">
-    <div class="head"><h1>Importar contactos <small><?= e($_SESSION['import']['name']) ?> · <?= count($data) ?> filas</small></h1>
-      <div class="actions"><button class="btn primary">Importar <?= count($data) ?> filas</button><a class="btn" href="index.php?p=contacts&a=cancelimport">Cancelar</a></div></div>
+    <div class="head"><h1>Importar contactos <small><?= e($_SESSION['import']['name']) ?> · <?= $dataTotal ?> filas</small></h1>
+      <div class="actions"><button class="btn primary">Importar <?= $dataTotal ?> filas</button><a class="btn" href="index.php?p=contacts&a=cancelimport">Cancelar</a></div></div>
     <?php if (!in_array('email', $map, true)): ?><div class="flash err">No se ha reconocido la columna del correo electrónico: indíquela en la tabla.</div><?php endif ?>
     <?php if ($hasDnc): ?><div class="flash">Se ha detectado la columna de «no enviar correos»: <b><?= $dncCount ?></b> contacto(s) se importarán como <b>baja</b> y no recibirán ningún envío.</div>
     <?php else: ?><div class="flash warn">No se ha detectado ninguna columna de «no enviar correos / Do Not Contact». Si el archivo la tiene, asígnele «No enviar correos (baja)» en la tabla.</div><?php endif ?>
@@ -156,8 +173,7 @@ if ($a === 'doimport' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $path = import_file();
         if (!$path) throw new RuntimeException('El archivo de importación ha caducado: súbalo de nuevo.');
         @set_time_limit(0);
-        $rows = import_rows($path);
-        if (!empty($_POST['header'])) array_shift($rows);
+        $skipHeader = !empty($_POST['header']);
         $map = ['tags' => []];
         foreach ((array)($_POST['map'] ?? []) as $i => $fld) {
             if (!isset(IMPORT_FIELDS[$fld]) || $fld === '') continue;
@@ -171,7 +187,8 @@ if ($a === 'doimport' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $get = fn($r, $k) => isset($map[$k]) ? trim((string)($r[$map[$k]] ?? '')) : '';
         $seen = [];
         db()->beginTransaction();
-        foreach ($rows as $r) {
+        foreach (table_rows($path) as $r) {   // fila a fila: memoria constante aunque el archivo sea grande
+            if ($skipHeader) { $skipHeader = false; continue; }
             $email = norm_email($get($r, 'email'));
             if ($email === '') continue;
             if (!valid_email($email)) { $n['bad']++; continue; }
@@ -191,6 +208,7 @@ if ($a === 'doimport' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($dnc && $ex['status'] === 'subscribed') {
                 q('UPDATE contacts SET status = ?, unsub_at = ? WHERE id = ?', [$dnc, now(), $ex['id']]);
+                q('DELETE FROM confirmations WHERE contact_id = ?', [$ex['id']]);
                 q("UPDATE queue SET status = 'skipped', error = 'Baja' WHERE contact_id = ? AND status = 'pending'", [$ex['id']]);
                 $n['dnc']++;
             }
@@ -223,7 +241,15 @@ if ($a === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($dup) flash('Ya existe un contacto con ese correo.', 'err');
     else {
         $d = [$email, trim($_POST['nombre'] ?? ''), trim($_POST['apellidos'] ?? ''), trim($_POST['empresa'] ?? ''), tags_pack($_POST['tags'] ?? ''), $st];
-        if ($id) q('UPDATE contacts SET email=?, nombre=?, apellidos=?, empresa=?, tags=?, status=? WHERE id=?', [...$d, $id]);
+        if ($id) {
+            $prev = (string)val('SELECT status FROM contacts WHERE id = ?', [$id]);
+            q('UPDATE contacts SET email=?, nombre=?, apellidos=?, empresa=?, tags=?, status=? WHERE id=?', [...$d, $id]);
+            if ($st !== 'subscribed' && $st !== 'pending' && $prev !== $st) {
+                // Baja o rebote marcados a mano: se anotan y se anulan los enlaces de confirmación pendientes
+                q('UPDATE contacts SET unsub_at = ? WHERE id = ?', [now(), $id]);
+                q('DELETE FROM confirmations WHERE contact_id = ?', [$id]);
+            }
+        }
         else q('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at) VALUES (?,?,?,?,?,?,?,?)', [...$d, token(), now()]);
         flash('Contacto guardado.');
         redirect('index.php?p=contacts');

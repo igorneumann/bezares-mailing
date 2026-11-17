@@ -56,6 +56,9 @@ function tr(string $key, string $lang): string
         'not_found_t' => ['Encuesta no encontrada', 'Survey not found'],
         'not_found' => ['El enlace no es correcto o la encuesta ya no existe.', 'The link is not correct or the survey no longer exists.'],
         'need_link' => ['Para responder a esta encuesta utilice el enlace personal que ha recibido por correo.', 'To answer this survey, please use the personal link you received by email.'],
+        'too_many' => ['Se han recibido demasiadas respuestas desde su conexión. Inténtelo de nuevo más tarde.', 'Too many answers have been received from your connection. Please try again later.'],
+        'expired' => ['El formulario ha caducado. Recargue la página e inténtelo de nuevo.', 'The form has expired. Please reload the page and try again.'],
+        'preview' => ['Vista previa para administradores: las respuestas no se guardan.', 'Administrator preview: answers are not saved.'],
         'thanks' => ['¡Gracias por su respuesta!', 'Thank you for your answer!'],
         'unsub_t' => ['Darse de baja', 'Unsubscribe'],
         'unsub_bad' => ['El enlace no es válido o ya no existe. Si desea dejar de recibir nuestros correos, responda a cualquiera de ellos indicándolo.', 'The link is not valid or no longer exists. If you no longer wish to receive our emails, please reply to any of them to let us know.'],
@@ -68,15 +71,28 @@ function tr(string $key, string $lang): string
         'resub_mistake' => ['Me he dado de baja por error: volver a suscribirme', 'I unsubscribed by mistake: subscribe me again'],
         'resub_t' => ['Suscripción reactivada', 'Subscription reactivated'],
         'resub_done' => ['Volverá a recibir nuestras comunicaciones en %s.', 'You will receive our communications again at %s.'],
+        'resub_sent' => ['Le hemos enviado un correo a %s: pulse el enlace que contiene para confirmar que quiere volver a suscribirse.', 'We have sent an email to %s: please click the link in it to confirm that you want to subscribe again.'],
+        'confirm_subject' => ['Confirme su suscripción', 'Please confirm your subscription'],
+        'confirm_text' => ['Hemos recibido una solicitud para suscribir esta dirección a las comunicaciones de %s. Para confirmarla, pulse el botón:', 'We received a request to subscribe this address to communications from %s. To confirm it, please click the button:'],
+        'confirm_button' => ['Confirmar suscripción', 'Confirm subscription'],
+        'confirm_ignore' => ['Si no lo ha solicitado usted, ignore este mensaje: no recibirá nada más. El enlace caduca en 7 días y solo se puede usar una vez.', 'If you did not request this, just ignore this message: you will not receive anything else. The link expires in 7 days and can only be used once.'],
+        'confirm_ask' => ['Pulse el botón para confirmar la suscripción de %s.', 'Click the button to confirm the subscription of %s.'],
+        'confirm_done' => ['¡Gracias! Su suscripción está confirmada.', 'Thank you! Your subscription is confirmed.'],
+        'confirm_bad' => ['El enlace de confirmación no es válido, ya se ha usado o ha caducado. Puede volver a suscribirse desde el formulario.', 'The confirmation link is not valid, has already been used or has expired. You can subscribe again using the form.'],
     ];
     return $t[$key][$lang === 'en' ? 1 : 0] ?? $key;
 }
 
 /* ---------- Encuesta dentro del correo ---------- */
 
+/** Firma del enlace personal: liga el contacto a ESA encuesta. Un token de contacto copiado de otro enlace no sirve sin ella. */
+function survey_sig(array $survey, string $contactToken): string
+{
+    return sign('srv|' . $survey['id'] . '|' . $contactToken);
+}
 function survey_url(array $survey, array $contact, array $extra = []): string
 {
-    $p = ['s' => $survey['slug'], 'c' => $contact['token']] + $extra;
+    $p = ['s' => $survey['slug'], 'c' => $contact['token'], 'k' => survey_sig($survey, (string)$contact['token'])] + $extra;
     return base_url() . '/s.php?' . http_build_query($p);
 }
 
@@ -441,11 +457,17 @@ function process_queue(?int $max = null): array
 
 /* ---------- Estadísticas de encuestas ---------- */
 
-function survey_limit_reached(array $survey, string $email): bool
+/**
+ * Límite de respuestas por contacto. Las respuestas verificadas (enlace personal firmado) y las del formulario público
+ * (correo escrito a mano, sin verificar) se cuentan por separado: alguien que escriba el correo de otra persona en el
+ * formulario público no puede impedir que esa persona responda después desde su enlace.
+ */
+function survey_limit_reached(array $survey, string $email, bool $verified = true): bool
 {
     $max = (int)$survey['max_per_contact'];
     if ($max <= 0) return false;
-    return (int)val('SELECT COUNT(*) FROM responses WHERE survey_id = ? AND email = ?', [$survey['id'], norm_email($email)]) >= $max;
+    return (int)val('SELECT COUNT(*) FROM responses WHERE survey_id = ? AND email = ? AND verified = ?',
+        [$survey['id'], norm_email($email), $verified ? 1 : 0]) >= $max;
 }
 
 /** Condición SQL para filtrar respuestas por idioma ('' = todas). Las respuestas antiguas sin idioma cuentan como español. */
@@ -547,7 +569,7 @@ function nps_notify_setup(): void
  * notify_mode: '' (no avisar), 'all' (cada respuesta) o 'low' (solo si la nota es igual o menor que notify_max).
  * Devuelve a cuántas direcciones se envió. Nunca lanza excepciones: un fallo del aviso no debe estropear la respuesta del cliente.
  */
-function survey_notify(array $survey, array $questions, array $values, string $email, ?array $contact, string $lang): int
+function survey_notify(array $survey, array $questions, array $values, string $email, ?array $contact, string $lang, bool $verified = true): int
 {
     try {
         $mode = (string)($survey['notify_mode'] ?? '');
@@ -559,7 +581,7 @@ function survey_notify(array $survey, array $questions, array $values, string $e
         $to = email_list((string)($lang === 'en' ? $survey['notify_en'] : $survey['notify_es']));
         if (!$to) $to = email_list((string)($lang === 'en' ? $survey['notify_es'] : $survey['notify_en']));
         if (!$to) return 0;
-        $contact ??= one('SELECT * FROM contacts WHERE email = ?', [$email]);
+        if (!$verified) $contact = null; // un correo escrito a mano no se atribuye a ningún contacto
         $color = brand_color();
         $f = 'font-family:Ubuntu, Helvetica, Arial, sans-serif;';
         $td = 'style="padding:7px 10px;border-bottom:1px solid #dde3e8;' . $f . 'font-size:14px;color:#222;vertical-align:top;"';
@@ -569,6 +591,7 @@ function survey_notify(array $survey, array $questions, array $values, string $e
         if ($name !== '') $rows[] = ['Nombre', e($name)];
         if (($contact['empresa'] ?? '') !== '') $rows[] = ['Empresa', e($contact['empresa'])];
         $rows[] = ['Idioma de la respuesta', $lang === 'en' ? 'Inglés' : 'Español'];
+        if (!$verified) $rows[] = ['Verificación', '<b style="color:#a12626;">Sin verificar</b>: llegó por el formulario público y el correo lo escribió quien respondió; puede no ser suyo.'];
         $rows[] = ['Fecha', date('d/m/Y H:i')];
         foreach ($questions as $q) {
             $v = (string)($values[$q['id']] ?? '');
@@ -589,7 +612,7 @@ function survey_notify(array $survey, array $questions, array $values, string $e
         foreach ($rows as [$k, $v]) $html .= "<tr><td $th>$k</td><td $td>$v</td></tr>";
         $html .= '</table><p style="' . $f . 'font-size:13px;color:#555;margin:18px 0 0;">Puede responder a este correo para escribir directamente al cliente. '
             . '<a href="' . e($link) . '" style="color:' . $color . ';">Ver todos los resultados</a>.</p></td></tr></table></body></html>';
-        $subject = '[' . $survey['title'] . '] ' . ($score !== null ? 'Nota ' . $score . ' de ' : 'Respuesta de ') . $email
+        $subject = '[' . $survey['title'] . '] ' . ($score !== null ? 'Nota ' . $score . ' de ' : 'Respuesta de ') . $email . ($verified ? '' : ' (sin verificar)')
             . (($contact['empresa'] ?? '') !== '' ? ' (' . $contact['empresa'] . ')' : '');
         $smtp = null;
         try {
@@ -611,4 +634,69 @@ function test_recipients(string $s): array
         if (valid_email($e)) $ok[$e] = true; else $bad[] = $p;
     }
     return [array_slice(array_keys($ok), 0, 20), $bad];
+}
+
+/* ---------- Confirmación por correo (altas y reactivaciones) ----------
+   Cada solicitud genera un token aleatorio de un solo uso que caduca a los 7 días. En la base de datos solo se guarda
+   su huella SHA-256. Al confirmar se borran todas las confirmaciones pendientes del contacto, y al darse de baja también,
+   así que un enlace antiguo nunca puede reactivar una suscripción cancelada después. */
+
+const CONFIRM_TTL = 7 * 86400;
+
+/** Envía el correo de confirmación. Devuelve false si se ha superado el límite de envíos (no se revela al visitante). */
+function send_confirmation(array $contact, string $lang, array $tags = [], array $data = []): bool
+{
+    $email = $contact['email'];
+    if (!throttle_ok('confirm-mail:' . $email, 1, 300) || !throttle_ok('confirm-mail:' . $email, 4, 86400)
+        || !throttle_ok('confirm-mail-all', 100, 3600)) return false;
+    throttle_hit('confirm-mail:' . $email);
+    throttle_hit('confirm-mail-all');
+    $raw = token(24);
+    q('DELETE FROM confirmations WHERE created_at < ?', [time() - CONFIRM_TTL]);
+    q('INSERT INTO confirmations (hash, contact_id, tags, data, created_at) VALUES (?,?,?,?,?)',
+        [hash('sha256', $raw), $contact['id'], tags_pack($tags), json_encode($data, JSON_UNESCAPED_UNICODE), time()]);
+    $url = base_url() . '/subscribe.php?confirm=' . $raw . ($lang === 'en' ? '&lang=en' : '');
+    $company = setting('company', 'Bezares');
+    $color = brand_color();
+    $f = 'font-family:Ubuntu, Helvetica, Arial, sans-serif;';
+    $logo = logo_url();
+    $html = '<!doctype html><html lang="' . $lang . '"><head><meta charset="utf-8"><title>' . e(tr('confirm_subject', $lang)) . '</title></head><body style="margin:0;padding:20px;background:#eef1f4;">'
+        . '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;"><tr><td style="padding:28px;">'
+        . ($logo ? '<img src="' . e($logo) . '" alt="' . e($company) . '" width="200" style="display:block;width:200px;height:auto;border:0;margin:0 0 20px;">' : '')
+        . '<p style="' . $f . 'font-size:15px;line-height:1.5;color:#222;margin:0 0 18px;">' . e(sprintf(tr('confirm_text', $lang), $company)) . '</p>'
+        . '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="' . $color . '" style="background:' . $color . ';border-radius:4px;">'
+        . '<a href="' . e($url) . '" style="display:inline-block;padding:12px 26px;' . $f . 'font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;">' . e(tr('confirm_button', $lang)) . '</a></td></tr></table>'
+        . '<p style="' . $f . 'font-size:12px;line-height:1.5;color:#777;margin:20px 0 0;">' . e(tr('confirm_ignore', $lang)) . '</p></td></tr></table></body></html>';
+    $smtp = null;
+    try { deliver($email, ['subject' => tr('confirm_subject', $lang), 'html' => $html, 'text' => html_to_text($html)], $smtp); }
+    finally { if ($smtp) $smtp->close(); }
+    return true;
+}
+
+/** Busca una confirmación vigente por su token. No la consume. */
+function confirmation_find(string $raw): ?array
+{
+    if (!preg_match('/^[a-f0-9]{48}$/', $raw)) return null;
+    $c = one('SELECT * FROM confirmations WHERE hash = ? AND created_at >= ?', [hash('sha256', $raw), time() - CONFIRM_TTL]);
+    if (!$c) return null;
+    $contact = one('SELECT * FROM contacts WHERE id = ?', [$c['contact_id']]);
+    // Una baja posterior a la solicitud invalida la confirmación
+    if (!$contact || ($contact['unsub_at'] && strtotime($contact['unsub_at']) > (int)$c['created_at'])) return null;
+    return ['confirmation' => $c, 'contact' => $contact];
+}
+
+/** Consume el token (un solo uso) y activa el contacto. Devuelve el contacto o null si el token no es válido. */
+function confirmation_redeem(string $raw): ?array
+{
+    $found = confirmation_find($raw);
+    if (!$found) return null;
+    ['confirmation' => $c, 'contact' => $contact] = $found;
+    // Borrado atómico: si dos peticiones llegan a la vez, solo una lo consigue
+    if (q('DELETE FROM confirmations WHERE id = ?', [$c['id']])->rowCount() !== 1) return null;
+    q('DELETE FROM confirmations WHERE contact_id = ?', [$contact['id']]);
+    $data = json_decode((string)$c['data'], true) ?: [];
+    q("UPDATE contacts SET status = 'subscribed', unsub_at = NULL, nombre = ?, apellidos = ?, empresa = ?, tags = ? WHERE id = ?", [
+        $contact['nombre'] ?: (string)($data['nombre'] ?? ''), $contact['apellidos'] ?: (string)($data['apellidos'] ?? ''),
+        $contact['empresa'] ?: (string)($data['empresa'] ?? ''), tags_pack(array_merge(tags_list($contact['tags']), tags_list((string)$c['tags']))), $contact['id']]);
+    return one('SELECT * FROM contacts WHERE id = ?', [$contact['id']]);
 }

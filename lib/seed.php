@@ -1,14 +1,14 @@
 <?php
 /* Datos iniciales: ajustes de Bezares, encuesta NPS y dos correos de ejemplo basados en los originales. */
 
-function seed_defaults(string $adminEmail): void
+function seed_defaults(string $adminEmail, string $baseUrl = ''): void
 {
     $color = '#00567d';
     @copy(ROOT . '/assets/logo-bezares-mailing.png', ROOT . '/uploads/logo.png');
     $settings = [
         'company' => 'BEZARES SA', 'address' => "Av. de las Retamas, 145 | Casarrubios del Monte, Toledo | 45950\nSpain",
         'color' => $color, 'logo' => is_file(ROOT . '/uploads/logo.png') ? 'logo.png' : '',
-        'base_url' => detect_base_url(), 'from_name' => 'Bezares Mailing', 'from_email' => '', 'reply_to' => '',
+        'base_url' => $baseUrl !== '' ? $baseUrl : detect_base_url(), 'force_https' => str_starts_with($baseUrl, 'https://') ? '1' : '0', 'from_name' => 'Bezares Mailing', 'from_email' => '', 'reply_to' => '',
         'driver' => 'smtp', 'smtp_host' => '', 'smtp_port' => '587', 'smtp_secure' => 'tls', 'smtp_user' => '', 'smtp_pass' => '',
         'batch' => '20', 'hourly_limit' => '0', 'cron_key' => token(12),
         'unsub_text' => 'Si no desea recibir más correos nuestros, puede [darse de baja] / [Unsubscribe].',
@@ -17,11 +17,11 @@ function seed_defaults(string $adminEmail): void
         'social_youtube' => 'https://www.youtube.com/channel/UCdQyMj7T-kc2sKd-71_CZug',
     ];
     foreach ($settings as $k => $v) set_setting($k, $v);
-    set_setting('schema', '5');
+    set_setting('schema', '6');
 
     // Encuesta NPS (basada en survey.bezares.com/285343)
     $sid = insert('INSERT INTO surveys (slug, title, description, thanks, max_per_contact, active, is_public, created_at) VALUES (?,?,?,?,?,?,?,?)',
-        ['nps', "Bezares' NPS", '', '¡Muchas gracias por su respuesta! Su opinión nos ayuda a seguir mejorando.', 1, 1, 1, now()]);
+        ['nps', "Bezares' NPS", '', '¡Muchas gracias por su respuesta! Su opinión nos ayuda a seguir mejorando.', 1, 1, 0, now()]);
     q('INSERT INTO questions (survey_id, position, type, label, options, is_required) VALUES (?,?,?,?,?,?)',
         [$sid, 1, 'nps', 'Basándose en su experiencia, ¿con qué probabilidad recomendaría Bezares?', '', 1]);
     q('INSERT INTO questions (survey_id, position, type, label, options, is_required) VALUES (?,?,?,?,?,?)',

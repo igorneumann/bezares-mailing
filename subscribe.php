@@ -1,10 +1,17 @@
 <?php
 /* Formulario público de suscripción a la newsletter, en español o inglés (?lang=en).
    Página limpia (sin cabecera ni marco, fondo transparente) pensada para incrustarse en un iframe.
-   Con la doble confirmación activada, el contacto queda "pendiente" hasta que pulsa el enlace que recibe por correo. */
+
+   Seguridad:
+   - Un contacto dado de baja, rebotado o pendiente SOLO se reactiva confirmando por correo, aunque la doble
+     confirmación esté desactivada. Los enlaces de confirmación son de un solo uso y caducan a los 7 días.
+   - Con la doble confirmación activada, también las altas nuevas y los cambios en contactos ya suscritos
+     (nuevas etiquetas) esperan a la confirmación.
+   - Límites por IP y por dirección de correo, campo trampa y tiempo mínimo de envío firmado.
+   - La respuesta al visitante es la misma exista o no la dirección, para no revelar quién está suscrito. */
 declare(strict_types=1);
 require __DIR__ . '/lib/public.php';
-public_boot();
+public_boot(true);
 
 $lang = lang_of($_GET['lang'] ?? $_POST['lang'] ?? 'es');
 $S = [
@@ -15,13 +22,11 @@ $S = [
     'bad_email' => ['Indique un correo electrónico válido.', 'Please enter a valid email address.'],
     'need_consent' => ['Marque la casilla para poder suscribirse.', 'Please tick the box to subscribe.'],
     'check_inbox' => ['¡Gracias! Le hemos enviado un correo: pulse el enlace que contiene para confirmar la suscripción.', 'Thank you! We have sent you an email: please click the link in it to confirm your subscription.'],
-    'done' => ['¡Gracias! Su suscripción está confirmada.', 'Thank you! Your subscription is confirmed.'],
-    'bad_link' => ['El enlace de confirmación no es válido o ha caducado.', 'The confirmation link is not valid or has expired.'],
+    'done' => ['¡Gracias por suscribirse! Si su dirección ya estaba registrada y se había dado de baja, le hemos enviado un correo para confirmar que quiere volver a recibir nuestras comunicaciones.',
+        'Thank you for subscribing! If your address was already registered and had unsubscribed, we have sent you an email to confirm that you want to receive our communications again.'],
     'error' => ['No hemos podido tramitar la suscripción en este momento. Inténtelo de nuevo más tarde.', 'We could not process your subscription right now. Please try again later.'],
-    'mail_subject' => ['Confirme su suscripción', 'Please confirm your subscription'],
-    'mail_text' => ['Hemos recibido una solicitud para suscribir esta dirección a las comunicaciones de %s. Para confirmarla, pulse el botón:', 'We received a request to subscribe this address to communications from %s. To confirm it, please click the button:'],
-    'mail_button' => ['Confirmar suscripción', 'Confirm subscription'],
-    'mail_ignore' => ['Si no lo ha solicitado usted, ignore este mensaje: no recibirá nada más.', 'If you did not request this, just ignore this message: you will not receive anything else.'],
+    'too_many' => ['Se han recibido demasiadas solicitudes desde su conexión. Inténtelo de nuevo más tarde.', 'Too many requests have been received from your connection. Please try again later.'],
+    'expired' => ['El formulario ha caducado. Recargue la página e inténtelo de nuevo.', 'The form has expired. Please reload the page and try again.'],
 ];
 $t = fn(string $k) => $S[$k][$lang === 'en' ? 1 : 0];
 $company = setting('company', 'Bezares');
@@ -29,12 +34,13 @@ $double = setting('sub_double', '1') === '1';
 $askName = setting('sub_fields', '1') === '1';
 $privacy = setting('sub_privacy_' . $lang) ?: setting('sub_privacy_es');
 $tagFor = fn() => tags_list(tags_pack(setting('sub_tag_' . $lang, $lang === 'en' ? 'newsletter-en' : 'newsletter-es')));
+$ip = client_ip();
 
 function sub_page(string $lang, string $inner): void
 {
     header('Content-Type: text/html; charset=UTF-8');
     header('X-Robots-Tag: noindex');
-    header('Referrer-Policy: no-referrer');
+    header('Cache-Control: no-store');
     $c = brand_color(); ?><!doctype html>
 <html lang="<?= $lang ?>"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Newsletter</title>
@@ -66,12 +72,22 @@ s();window.addEventListener('load',s);window.addEventListener('resize',s);})();
 }
 $msg = fn(string $text, bool $err = false) => '<div class="msg' . ($err ? ' err' : '') . '" role="status">' . e($text) . '</div>';
 
-/* ---------- Confirmación desde el correo ---------- */
-if (isset($_GET['confirm'])) {
-    $c = one('SELECT * FROM contacts WHERE token = ?', [(string)$_GET['confirm']]);
-    if (!$c || !hash_equals(sign('sub' . $c['id']), (string)($_GET['h'] ?? ''))) sub_page($lang, $msg($t('bad_link'), true));
-    q("UPDATE contacts SET status = 'subscribed', unsub_at = NULL WHERE id = ?", [$c['id']]);
-    sub_page($lang, $msg($t('done')));
+/* ---------- Confirmación desde el correo: GET muestra un botón, POST consume el token ----------
+   Así los antivirus que abren los enlaces del correo no confirman nada por su cuenta. */
+if (isset($_GET['confirm']) || isset($_POST['confirm'])) {
+    $raw = (string)($_POST['confirm'] ?? $_GET['confirm']);
+    if (!throttle_ok('confirm-try:' . $ip, 30, 3600)) sub_page($lang, $msg($t('too_many'), true));
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        throttle_hit('confirm-try:' . $ip);
+        $c = confirmation_redeem($raw);
+        sub_page($lang, $c ? $msg(tr('confirm_done', $lang)) : $msg(tr('confirm_bad', $lang), true));
+    }
+    $found = confirmation_find($raw);
+    if (!$found) { throttle_hit('confirm-try:' . $ip); sub_page($lang, $msg(tr('confirm_bad', $lang), true)); }
+    sub_page($lang, '<form method="post" action="subscribe.php' . ($lang === 'en' ? '?lang=en' : '') . '">'
+        . '<input type="hidden" name="confirm" value="' . e($raw) . '"><input type="hidden" name="lang" value="' . $lang . '">'
+        . '<p style="margin:0">' . sprintf(e(tr('confirm_ask', $lang)), '<b>' . e($found['contact']['email']) . '</b>') . '</p>'
+        . '<button>' . e(tr('confirm_button', $lang)) . '</button></form>');
 }
 
 $err = '';
@@ -79,49 +95,42 @@ $in = ['email' => '', 'nombre' => '', 'apellidos' => '', 'empresa' => ''];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($in as $k => $_) $in[$k] = mb_substr(trim((string)($_POST[$k] ?? '')), 0, 150);
     $email = norm_email($in['email']);
-    // Anti-robots: campo trampa y tiempo mínimo desde que se cargó el formulario
+    // Anti-robots: campo trampa y tiempo mínimo desde que se cargó el formulario (marca de tiempo firmada)
     $ts = (int)($_POST['ts'] ?? 0);
     $bot = ($_POST['web'] ?? '') !== '' || !hash_equals(sign('ts' . $ts), (string)($_POST['th'] ?? '')) || time() - $ts < 2;
-    if ($bot) sub_page($lang, $msg($t($double ? 'check_inbox' : 'done'))); // respuesta neutra
-    if (time() - $ts > 43200) $err = $t('error'); // formulario abierto desde hace más de 12 h: se pide reintentar
+    $neutral = $msg($t($double ? 'check_inbox' : 'done'));
+    if ($bot) sub_page($lang, $neutral);
+    if (!throttle_ok('sub-ip:' . $ip, 10, 3600) || !throttle_ok('sub-ip:' . $ip, 30, 86400)) sub_page($lang, $msg($t('too_many'), true));
+    if (time() - $ts > 43200) $err = $t('expired');
     elseif (!valid_email($email)) $err = $t('bad_email');
     elseif (empty($_POST['consent'])) $err = $t('need_consent');
     else {
+        throttle_hit('sub-ip:' . $ip);
         try {
+            $data = ['nombre' => $in['nombre'], 'apellidos' => $in['apellidos'], 'empresa' => $in['empresa']];
             $ex = one('SELECT * FROM contacts WHERE email = ?', [$email]);
-            // Límite de altas pendientes por hora: evita que el formulario se use para enviar correos en masa
-            if ($double && (!$ex || $ex['status'] !== 'subscribed')
-                && (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'pending' AND created_at >= ?", [date('Y-m-d H:i:s', time() - 3600)]) >= 60)
-                throw new RuntimeException('límite');
-            $status = $double ? 'pending' : 'subscribed';
             if (!$ex) {
-                $id = insert('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at) VALUES (?,?,?,?,?,?,?,?)',
-                    [$email, $in['nombre'], $in['apellidos'], $in['empresa'], tags_pack($tagFor()), $status, token(), now()]);
-                $ex = one('SELECT * FROM contacts WHERE id = ?', [$id]);
+                if ($double) {
+                    // Alta nueva pendiente: las etiquetas se añaden al confirmar
+                    $id = insert('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                        [$email, $in['nombre'], $in['apellidos'], $in['empresa'], '', 'pending', token(), now()]);
+                    send_confirmation(one('SELECT * FROM contacts WHERE id = ?', [$id]), $lang, $tagFor(), $data);
+                } else {
+                    insert('INSERT INTO contacts (email, nombre, apellidos, empresa, tags, status, token, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                        [$email, $in['nombre'], $in['apellidos'], $in['empresa'], tags_pack($tagFor()), 'subscribed', token(), now()]);
+                }
+            } elseif ($ex['status'] !== 'subscribed') {
+                // Baja, rebote o pendiente: la reactivación exige SIEMPRE confirmar por correo. No se toca nada hasta entonces.
+                send_confirmation($ex, $lang, $tagFor(), $data);
+            } elseif ($double) {
+                // Ya suscrito: las nuevas etiquetas (otro listado) también esperan a la confirmación
+                if (array_diff($tagFor(), tags_list($ex['tags']))) send_confirmation($ex, $lang, $tagFor(), $data);
             } else {
-                // Contacto existente: se añaden las etiquetas y se completan los datos vacíos; una baja solo se reactiva tras confirmar
-                q('UPDATE contacts SET nombre = ?, apellidos = ?, empresa = ?, tags = ? WHERE id = ?', [$ex['nombre'] ?: $in['nombre'], $ex['apellidos'] ?: $in['apellidos'],
-                    $ex['empresa'] ?: $in['empresa'], tags_pack(array_merge(tags_list($ex['tags']), $tagFor())), $ex['id']]);
-                if ($ex['status'] !== 'subscribed' && !$double) q("UPDATE contacts SET status = 'subscribed', unsub_at = NULL WHERE id = ?", [$ex['id']]);
+                // Sin doble confirmación y ya suscrito: se añade la etiqueta del listado, sin modificar sus datos
+                q('UPDATE contacts SET tags = ? WHERE id = ?', [tags_pack(array_merge(tags_list($ex['tags']), $tagFor())), $ex['id']]);
             }
-            if ($double && $ex['status'] !== 'subscribed') {
-                $url = base_url() . '/subscribe.php?confirm=' . $ex['token'] . '&h=' . sign('sub' . $ex['id']) . ($lang === 'en' ? '&lang=en' : '');
-                $color = brand_color();
-                $f = 'font-family:Ubuntu, Helvetica, Arial, sans-serif;';
-                $logo = logo_url();
-                $html = '<!doctype html><html lang="' . $lang . '"><head><meta charset="utf-8"><title>' . e($t('mail_subject')) . '</title></head><body style="margin:0;padding:20px;background:#eef1f4;">'
-                    . '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;"><tr><td style="padding:28px;">'
-                    . ($logo ? '<img src="' . e($logo) . '" alt="' . e($company) . '" width="200" style="display:block;width:200px;height:auto;border:0;margin:0 0 20px;">' : '')
-                    . '<p style="' . $f . 'font-size:15px;line-height:1.5;color:#222;margin:0 0 18px;">' . e(sprintf($t('mail_text'), $company)) . '</p>'
-                    . '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="' . $color . '" style="background:' . $color . ';border-radius:4px;">'
-                    . '<a href="' . e($url) . '" style="display:inline-block;padding:12px 26px;' . $f . 'font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;">' . e($t('mail_button')) . '</a></td></tr></table>'
-                    . '<p style="' . $f . 'font-size:12px;line-height:1.5;color:#777;margin:20px 0 0;">' . e($t('mail_ignore')) . '</p></td></tr></table></body></html>';
-                $smtp = null;
-                try { deliver($email, ['subject' => $t('mail_subject'), 'html' => $html, 'text' => html_to_text($html)], $smtp); }
-                finally { if ($smtp) $smtp->close(); }
-            }
-            // Misma respuesta exista o no el contacto: no se revela quién está ya suscrito
-            sub_page($lang, $msg($t($double ? 'check_inbox' : 'done')));
+            // Misma respuesta exista o no el contacto: no se revela quién está ya suscrito o dado de baja
+            sub_page($lang, $neutral);
         } catch (Throwable $e) {
             $err = $t('error');
         }

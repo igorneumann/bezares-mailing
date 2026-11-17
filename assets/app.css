@@ -216,3 +216,9 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 /* Aviso de respuestas */
 .notifybox{border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:8px;padding:.7rem 1rem .2rem;margin-bottom:1rem;background:#fffdf8}
 .notifybox h3{margin:.1rem 0 .7rem;color:var(--ink)}.row3.n3{grid-template-columns:minmax(220px,340px) 200px}
+
+/* Seguridad del servidor */
+.secstat{list-style:none;padding:0;margin:0 0 .8rem}.secstat>li{padding:.35rem 0 .35rem 1.6rem;position:relative}
+.secstat>li::before{position:absolute;left:0;font-weight:700}.secstat li.ok::before{content:"✓";color:var(--ok)}
+.secstat li.warn::before{content:"!";color:var(--warn)}.secstat li.bad::before{content:"✗";color:var(--bad)}
+.secstat ul{margin:.3rem 0 0;color:#a12626}

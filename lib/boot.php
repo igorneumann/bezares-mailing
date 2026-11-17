@@ -7,6 +7,8 @@ date_default_timezone_set('Europe/Madrid');
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
+require_once __DIR__ . '/security.php';
+
 /* ---------- Configuración y base de datos ---------- */
 
 function cfg(): ?array
@@ -27,7 +29,8 @@ function db_connect(array $c): PDO
             $c['user'], $c['pass']
         );
     } else {
-        $pdo = new PDO('sqlite:' . ROOT . '/data/' . $c['file']);
+        $dir = rtrim((string)($c['data_dir'] ?? '') !== '' ? (string)$c['data_dir'] : ROOT . '/data', '/\\');
+        $pdo = new PDO('sqlite:' . $dir . '/' . basename((string)$c['file']));
         $pdo->exec('PRAGMA busy_timeout=8000');
     }
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -79,8 +82,12 @@ function schema_sql(string $driver): array
             notify_mode VARCHAR(10) NOT NULL DEFAULT '', notify_max INT NOT NULL DEFAULT 6, notify_es VARCHAR(500) NOT NULL DEFAULT '', notify_en VARCHAR(500) NOT NULL DEFAULT '')",
         "questions (id $pk, survey_id INT NOT NULL, position INT NOT NULL DEFAULT 0, type VARCHAR(20) NOT NULL,
             label TEXT, options TEXT, is_required INT NOT NULL DEFAULT 0, label_en TEXT, options_en TEXT)",
-        "responses (id $pk, survey_id INT NOT NULL, contact_id INT, email VARCHAR(190) NOT NULL, created_at VARCHAR(19) NOT NULL, lang VARCHAR(5))",
+        "responses (id $pk, survey_id INT NOT NULL, contact_id INT, email VARCHAR(190) NOT NULL, created_at VARCHAR(19) NOT NULL, lang VARCHAR(5),
+            verified INT NOT NULL DEFAULT 1)",
         "answers (id $pk, response_id INT NOT NULL, question_id INT NOT NULL, value TEXT)",
+        "throttle (id $pk, k VARCHAR(190) NOT NULL, at INT NOT NULL)",
+        "confirmations (id $pk, hash VARCHAR(64) NOT NULL UNIQUE, contact_id INT NOT NULL, tags VARCHAR(500) NOT NULL DEFAULT '',
+            data TEXT, created_at INT NOT NULL)",
         "nps_runs (id $pk, label VARCHAR(60) NOT NULL UNIQUE, email_id INT, survey_id INT, reminder_email_id INT, send_id INT,
             tag VARCHAR(190) NOT NULL DEFAULT '', sent_at VARCHAR(19) NOT NULL, reminder_at VARCHAR(19), results_at VARCHAR(19),
             reminder_done INT NOT NULL DEFAULT 0, results_done INT NOT NULL DEFAULT 0, note VARCHAR(500), email_en_id INT, send_en_id INT)",
@@ -92,6 +99,7 @@ function schema_sql(string $driver): array
     $sql[] = "CREATE INDEX ix_queue_email ON queue (email_id, contact_id)";
     $sql[] = "CREATE INDEX ix_resp_survey ON responses (survey_id, email)";
     $sql[] = "CREATE INDEX ix_answers_resp ON answers (response_id)";
+    $sql[] = "CREATE INDEX ix_throttle ON throttle (k, at)";
     $sql[] = "CREATE INDEX ix_questions_survey ON questions (survey_id)";
     return $sql;
 }
@@ -122,11 +130,12 @@ function now(): string { return date('Y-m-d H:i:s'); }
 function fecha(?string $d): string { return $d ? date('d/m/Y H:i', strtotime($d)) : ''; }
 function token(int $bytes = 16): string { return bin2hex(random_bytes($bytes)); }
 
+/** Dirección deducida de la petición. Solo se usa en la instalación, como valor propuesto; después manda la de Ajustes. */
 function detect_base_url(): string
 {
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $https = is_https();
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'localhost');
+    if (!preg_match('/^[a-z0-9.\-]+(:\d{1,5})?$|^\[[0-9a-f:]+\](:\d{1,5})?$/i', $host)) $host = 'localhost';
     $dir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
     return ($https ? 'https' : 'http') . '://' . $host . $dir;
 }
@@ -159,9 +168,11 @@ function csrf_check(): void
 }
 function start_session(): void
 {
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
     session_name('bzmailing');
-    session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax',
-        'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off']);
+    // Secure siempre que la dirección configurada sea https, aunque PHP no detecte bien el HTTPS detrás de un proxy
+    session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'path' => cookie_path(), 'secure' => base_is_https() || is_https()]);
     session_start();
 }
 /* ---------- "Mantener la sesión iniciada" ----------
@@ -171,8 +182,8 @@ const REMEMBER_COOKIE = 'bzmailing_rec';
 const REMEMBER_DAYS = 30;
 function remember_cookie(string $value, int $expires): void
 {
-    setcookie(REMEMBER_COOKIE, $value, ['expires' => $expires, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax',
-        'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off']);
+    setcookie(REMEMBER_COOKIE, $value, ['expires' => $expires, 'path' => cookie_path(), 'httponly' => true, 'samesite' => 'Lax',
+        'secure' => base_is_https() || is_https()]);
 }
 function remember_sign(array $user, int $exp): string
 {
@@ -251,6 +262,7 @@ function layout_start(string $title, string $active): void
 </header>
 <main>
 <?php foreach (flash() as [$type, $msg]): ?><div class="flash <?= e($type) ?>"><?= e($msg) ?></div><?php endforeach ?>
+<?php $exp = json_decode((string)setting('exposure'), true); if (!empty($exp['problems']) && $active !== 'settings'): ?><div class="flash err">Problema de seguridad en el servidor: <?= e($exp['problems'][0]) ?> <a href="index.php?p=settings#seguridad">Ver detalles</a></div><?php endif ?>
 <?php
 }
 function layout_end(): void

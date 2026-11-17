@@ -316,9 +316,9 @@ function nps_results_xlsx(array $run, array $questions): ?string
     if (!function_exists('xlsx_write') || !class_exists('ZipArchive')) return null;
     $ans = [];
     foreach (all('SELECT a.* FROM answers a JOIN responses r ON r.id = a.response_id WHERE r.survey_id = ?', [$run['survey_id']]) as $x) $ans[$x['response_id']][$x['question_id']] = $x['value'];
-    $rows = [array_merge(['fecha', 'email', 'nombre', 'empresa', 'idioma'], array_column($questions, 'label'))];
+    $rows = [array_merge(['fecha', 'email', 'nombre', 'empresa', 'idioma', 'verificada'], array_column($questions, 'label'))];
     foreach (all('SELECT r.*, c.nombre, c.apellidos, c.empresa FROM responses r LEFT JOIN contacts c ON c.id = r.contact_id WHERE r.survey_id = ? ORDER BY r.id', [$run['survey_id']]) as $r) {
-        $row = [$r['created_at'], $r['email'], trim($r['nombre'] . ' ' . $r['apellidos']), (string)$r['empresa'], lang_of($r['lang'] ?? 'es')];
+        $row = [$r['created_at'], $r['email'], trim($r['nombre'] . ' ' . $r['apellidos']), (string)$r['empresa'], lang_of($r['lang'] ?? 'es'), empty($r['verified']) ? 'no' : 'sí'];
         foreach ($questions as $q) {
             $v = $ans[$r['id']][$q['id']] ?? '';
             $row[] = in_array($q['type'], ['nps', 'rating'], true) && $v !== '' ? (int)$v : $v;

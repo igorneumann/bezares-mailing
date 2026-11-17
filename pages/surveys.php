@@ -79,9 +79,9 @@ if (($a === 'results' || $a === 'export') && $survey) {
     foreach (all('SELECT a.* FROM answers a JOIN responses r ON r.id = a.response_id WHERE r.survey_id = ?', [$id]) as $x) $ans[$x['response_id']][$x['question_id']] = $x['value'];
 
     if ($a === 'export') {
-        $rows = [array_merge(['fecha', 'email', 'nombre', 'empresa', 'idioma'], array_column($questions, 'label'))];
+        $rows = [array_merge(['fecha', 'email', 'nombre', 'empresa', 'idioma', 'verificada'], array_column($questions, 'label'))];
         foreach ($responses as $r) {
-            $row = [$r['created_at'], $r['email'], trim($r['nombre'] . ' ' . $r['apellidos']), (string)$r['empresa'], lang_of($r['lang'] ?? 'es')];
+            $row = [$r['created_at'], $r['email'], trim($r['nombre'] . ' ' . $r['apellidos']), (string)$r['empresa'], lang_of($r['lang'] ?? 'es'), empty($r['verified']) ? 'no' : 'sí'];
             foreach ($questions as $qq) {
                 $v = $ans[$r['id']][$qq['id']] ?? '';
                 $row[] = in_array($qq['type'], ['nps', 'rating'], true) && $v !== '' ? (int)$v : $v;
@@ -129,7 +129,8 @@ if (($a === 'results' || $a === 'export') && $survey) {
       <div class="seg"><?php foreach ($summary as $lg => $row): ?><a class="<?= $lg === $view ? 'on' : '' ?>" href="index.php?p=surveys&a=results&id=<?= $id . ($lg ? '&v=' . $lg : '') ?>"><?= e($lg === '' ? 'General' : $row['label']) ?> <i><?= $row['responses'] ?></i></a><?php endforeach ?></div>
     </div>
     <div class="kpis">
-      <div class="card kpi"><span>Respuestas · <?= e($summary[$view]['label']) ?></span><b><?= count($responses) ?></b></div>
+      <?php $nUnv = count(array_filter($responses, fn($r) => empty($r['verified']))); ?>
+      <div class="card kpi"><span>Respuestas · <?= e($summary[$view]['label']) ?><?= $nUnv ? " · $nUnv sin verificar" : '' ?></span><b><?= count($responses) ?></b></div>
       <div class="card kpi"><span>Contactos que recibieron la encuesta</span><b><?= $sentTo ?></b></div>
       <div class="card kpi"><span>Tasa de respuesta</span><b><?= $sentTo ? round(min(100, count($responses) / $sentTo * 100)) . '%' : '—' ?></b></div>
     </div>
@@ -175,7 +176,7 @@ if (($a === 'results' || $a === 'export') && $survey) {
       <thead><tr><th>Fecha</th><th>Correo</th><?php foreach ($questions as $qq): ?><th><?= e(mb_strimwidth($qq['label'], 0, 40, '…')) ?></th><?php endforeach ?><th></th></tr></thead>
       <tbody>
       <?php foreach ($responses as $r): ?>
-        <tr><td class="nowrap muted"><?= fecha($r['created_at']) ?></td><td><?= e($r['email']) ?><?= ($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '' ?><?= $r['empresa'] ? '<br><span class="muted">' . e($r['empresa']) . '</span>' : '' ?></td>
+        <tr><td class="nowrap muted"><?= fecha($r['created_at']) ?></td><td><?= e($r['email']) ?><?= ($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '' ?><?= empty($r['verified']) ? ' <span class="pill pending" title="Formulario público: el correo lo escribió quien respondió">Sin verificar</span>' : '' ?><?= $r['empresa'] ? '<br><span class="muted">' . e($r['empresa']) . '</span>' : '' ?></td>
           <?php foreach ($questions as $qq): ?><td><?= nl2br(e($ans[$r['id']][$qq['id']] ?? '')) ?></td><?php endforeach ?>
           <td><form method="post" action="index.php?p=surveys&a=delresp&id=<?= $id ?>" onsubmit="return confirm('¿Eliminar esta respuesta?')"><?= csrf_field() ?><input type="hidden" name="rid" value="<?= $r['id'] ?>"><button class="btn small danger" title="Eliminar">×</button></form></td></tr>
       <?php endforeach ?>
@@ -187,7 +188,7 @@ if (($a === 'results' || $a === 'export') && $survey) {
 
 /* ---------- Editor ---------- */
 if ($a === 'edit') {
-    $s = $survey ?? ['id' => 0, 'slug' => '', 'title' => '', 'description' => '', 'thanks' => '¡Gracias por su respuesta!', 'max_per_contact' => 1, 'active' => 1, 'is_public' => 1];
+    $s = $survey ?? ['id' => 0, 'slug' => '', 'title' => '', 'description' => '', 'thanks' => '¡Gracias por su respuesta!', 'max_per_contact' => 1, 'active' => 1, 'is_public' => 0];
     $qs = $s['id'] ? all('SELECT * FROM questions WHERE survey_id = ? ORDER BY position, id', [$s['id']]) : [];
     if (!$qs) $qs = [['id' => 0, 'type' => 'nps', 'label' => '', 'options' => '', 'is_required' => 1]];
     $qrow = function ($i, $q) use ($TYPES) { ob_start(); ?>
@@ -211,7 +212,7 @@ if ($a === 'edit') {
     <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
     <div class="head"><h1><?= $s['id'] ? 'Editar encuesta' : 'Nueva encuesta' ?></h1>
       <div class="actions"><button class="btn primary">Guardar</button>
-        <?php if ($s['id']): ?><a class="btn" href="index.php?p=surveys&a=results&id=<?= $s['id'] ?>">Resultados</a><a class="btn" target="_blank" href="s.php?s=<?= e($s['slug']) ?>&vista=1">Ver formulario</a><a class="btn" target="_blank" href="s.php?s=<?= e($s['slug']) ?>&lang=en">Ver en inglés</a><?php endif ?>
+        <?php if ($s['id']): ?><a class="btn" href="index.php?p=surveys&a=results&id=<?= $s['id'] ?>">Resultados</a><a class="btn" target="_blank" href="s.php?s=<?= e($s['slug']) ?>&preview=<?= sign('preview|' . $s['id']) ?>">Vista previa</a><a class="btn" target="_blank" href="s.php?s=<?= e($s['slug']) ?>&lang=en&preview=<?= sign('preview|' . $s['id']) ?>">En inglés</a><?php endif ?>
         <a class="btn" href="index.php?p=surveys">Volver</a></div></div>
     <div class="card form">
       <div class="row2">
@@ -247,7 +248,8 @@ if ($a === 'edit') {
         <label>Máximo de respuestas por contacto (0 = sin límite)<input type="number" min="0" name="max_per_contact" value="<?= (int)$s['max_per_contact'] ?>"></label>
         <div>
           <label class="check"><input type="checkbox" name="active" <?= $s['active'] ? 'checked' : '' ?>> Encuesta abierta (admite respuestas)</label>
-          <label class="check"><input type="checkbox" name="is_public" <?= $s['is_public'] ? 'checked' : '' ?>> Permitir responder sin enlace personal (escribiendo el correo)</label>
+          <label class="check"><input type="checkbox" name="is_public" <?= $s['is_public'] ? 'checked' : '' ?>> Encuesta pública: permitir responder sin enlace personal (escribiendo el correo)</label>
+          <p class="muted" style="margin:-.4rem 0 0 1.6rem">Esas respuestas quedan marcadas «sin verificar»: el correo lo escribe quien responde y puede no ser suyo. Desactívelo cuando importe saber quién responde (por ejemplo, el NPS).</p>
         </div>
       </div>
     </div>
@@ -274,7 +276,7 @@ layout_start('Encuestas', 'surveys'); ?>
       $nps = null;
       foreach (survey_stats($r) as $qq) if ($qq['type'] === 'nps') { $nps = $qq['nps']; break; } ?>
     <tr>
-      <td><a href="index.php?p=surveys&a=edit&id=<?= $r['id'] ?>"><b><?= e($r['title']) ?></b></a><br><span class="muted"><?= e(base_url() . '/s.php?s=' . $r['slug']) ?></span></td>
+      <td><a href="index.php?p=surveys&a=edit&id=<?= $r['id'] ?>"><b><?= e($r['title']) ?></b></a><br><span class="muted"><?= $r['is_public'] ? 'Pública: ' . e(base_url() . '/s.php?s=' . $r['slug']) : 'Solo con enlace personal del correo' ?></span></td>
       <td><span class="pill <?= $r['active'] ? 'subscribed' : 'unsubscribed' ?>"><?= $r['active'] ? 'Abierta' : 'Cerrada' ?></span></td>
       <td><?= $r['max_per_contact'] ? (int)$r['max_per_contact'] : 'Sin límite' ?></td>
       <td><?= $r['n'] ?></td>

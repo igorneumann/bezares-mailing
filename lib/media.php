@@ -116,50 +116,78 @@ function email_attachments(array $email): array
     return array_values(array_unique($out));
 }
 
-/** Solo direcciones http(s) públicas: evita que el servidor pida recursos de su red interna. */
-function media_url_allowed(string $url): bool
+/* ---------- Descargas desde otras webs (protección contra SSRF) ----------
+   - Solo http/https, solo puertos 80 y 443, sin usuario:contraseña en la dirección.
+   - Se resuelven TODAS las IP del nombre (IPv4 e IPv6) y todas tienen que ser públicas.
+   - La conexión se fija a la IP ya validada (CURLOPT_RESOLVE), así un cambio de DNS entre la comprobación
+     y la conexión (DNS rebinding) no puede llevarla a otra máquina. Después se verifica la IP realmente usada.
+   - Las redirecciones se siguen a mano (máximo 3) y cada destino se vuelve a validar igual.
+   - No se usa ningún proxy del entorno. No hay ninguna opción para permitir redes privadas. */
+
+const FETCH_PORTS = ['http' => 80, 'https' => 443];
+
+/** Valida una dirección y devuelve [esquema, host, puerto, IP validada]. Lanza una excepción si no se permite. */
+function safe_target(string $url): array
 {
-    $p = parse_url($url);
-    if (!$p || !in_array(strtolower($p['scheme'] ?? ''), ['http', 'https'], true) || empty($p['host'])) return false;
-    if (!empty(cfg()['allow_private_fetch'])) return true;
-    $ips = @gethostbynamel($p['host']) ?: [];
-    if (!$ips) return false;
-    foreach ($ips as $ip)
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return false;
-    return true;
+    $p = parse_url(trim($url));
+    $scheme = strtolower((string)($p['scheme'] ?? ''));
+    if (!$p || !isset(FETCH_PORTS[$scheme])) throw new RuntimeException('Solo se admiten direcciones http o https.');
+    if (isset($p['user']) || isset($p['pass'])) throw new RuntimeException('La dirección no puede incluir usuario ni contraseña.');
+    $host = strtolower(trim((string)($p['host'] ?? ''), '[]'));
+    if ($host === '' || !preg_match('/^[a-z0-9.\-:]+$/', $host)) throw new RuntimeException('Dirección no válida.');
+    $port = (int)($p['port'] ?? FETCH_PORTS[$scheme]);
+    if (!in_array($port, FETCH_PORTS, true)) throw new RuntimeException('Solo se admiten los puertos 80 y 443.');
+    $ips = resolve_host($host);
+    if (!$ips) throw new RuntimeException('No se encuentra el servidor ' . $host . '.');
+    foreach ($ips as $ip) {
+        if (!ip_is_public($ip)) throw new RuntimeException('La dirección apunta a una red privada, local o reservada: no está permitido.');
+    }
+    // Se prefiere IPv4 (más compatible en hostings compartidos)
+    usort($ips, fn($a, $b) => (int)str_contains($a, ':') <=> (int)str_contains($b, ':'));
+    return [$scheme, $host, $port, $ips[0]];
+}
+
+/** Petición GET conectando obligatoriamente a $ip. Devuelve [código HTTP, cuerpo, Location absoluta]. */
+function http_fetch_pinned(string $url, string $host, int $port, string $ip, int $timeout): array
+{
+    $data = '';
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RESOLVE => [$host . ':' . $port . ':' . (str_contains($ip, ':') ? '[' . $ip . ']' : $ip)],
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXREDIRS => 0,
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_USERAGENT => 'BezaresMailing/2.7',
+        CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$data) {
+            $data .= $chunk;
+            return strlen($data) > MEDIA_MAX ? 0 : strlen($chunk);
+        },
+    ]);
+    $ok = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $loc = (string)curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+    $used = (string)curl_getinfo($ch, CURLINFO_PRIMARY_IP);
+    $err = curl_error($ch);
+    curl_close($ch);
+    if ($used !== '' && inet_pton($used) !== inet_pton($ip)) throw new RuntimeException('La conexión no se hizo con la dirección validada.');
+    if ($ok === false && !($code >= 300 && $code < 400)) {
+        throw new RuntimeException(strlen($data) > MEDIA_MAX ? 'El archivo supera los 8 MB.' : 'No se pudo descargar (' . $err . ').');
+    }
+    return [$code, $data, $loc];
 }
 
 function http_download(string $url, int $timeout = 20): string
 {
-    if (!media_url_allowed($url)) throw new RuntimeException('Dirección no válida o no accesible.');
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        $data = '';
-        curl_setopt_array($ch, [
-            CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_USERAGENT => 'BezaresMailing/1.1', CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$data) {
-                $data .= $chunk;
-                return strlen($data) > MEDIA_MAX ? 0 : strlen($chunk);
-            },
-        ]);
-        $ok = curl_exec($ch);
-        $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        $loc = (string)curl_getinfo($ch, CURLINFO_REDIRECT_URL);
-        $err = curl_error($ch);
-        curl_close($ch);
-        if ($code >= 300 && $code < 400 && $loc !== '') {
-            static $hops = 0;
-            if (++$hops > 3) { $hops = 0; throw new RuntimeException('Demasiadas redirecciones.'); }
-            try { return http_download($loc, $timeout); } finally { $hops = 0; }
-        }
-        if ($ok === false || $code !== 200) throw new RuntimeException($code ? "El servidor respondió $code." : "No se pudo descargar ($err).");
+    if (!function_exists('curl_init')) throw new RuntimeException('El servidor necesita la extensión cURL de PHP para descargar archivos de otras webs.');
+    for ($hop = 0; $hop <= 3; $hop++) {
+        [, $host, $port, $ip] = safe_target($url);
+        [$code, $data, $loc] = http_fetch_pinned($url, $host, $port, $ip, $timeout);
+        if ($code >= 300 && $code < 400 && $loc !== '') { $url = $loc; continue; }
+        if ($code !== 200) throw new RuntimeException('El servidor respondió ' . $code . '.');
         return $data;
     }
-    $ctx = stream_context_create(['http' => ['timeout' => $timeout, 'follow_location' => 0, 'user_agent' => 'BezaresMailing/1.1']]);
-    $data = @file_get_contents($url, false, $ctx, 0, MEDIA_MAX + 1);
-    if ($data === false) throw new RuntimeException('No se pudo descargar la imagen.');
-    return $data;
+    throw new RuntimeException('Demasiadas redirecciones.');
 }
 
 /** Descarga una imagen de otra web y la guarda en la biblioteca. Devuelve el nombre del archivo. */
@@ -234,7 +262,7 @@ function media_usage(string $name): array
 function migrate(): void
 {
     $v = (int)setting('schema', '1');
-    if ($v >= 5) return;
+    if ($v >= 6) return;
     $try = function (string $sql) { try { db()->exec($sql); } catch (Throwable $e) { /* ya existe */ } };
     if ($v < 2) $try('ALTER TABLE emails ADD COLUMN attachments TEXT');
     // v3: tabla de campañas NPS automáticas (CREATE TABLE IF NOT EXISTS del esquema completo)
@@ -246,7 +274,14 @@ function migrate(): void
     // v5: aviso por correo de las respuestas de cada encuesta
     foreach (["notify_mode VARCHAR(10) NOT NULL DEFAULT ''", 'notify_max INT NOT NULL DEFAULT 6', "notify_es VARCHAR(500) NOT NULL DEFAULT ''",
         "notify_en VARCHAR(500) NOT NULL DEFAULT ''"] as $col) $try("ALTER TABLE surveys ADD COLUMN $col");
-    set_setting('schema', '5');
+    // v6: seguridad. Tokens de confirmación de un solo uso, respuestas verificadas, límites de frecuencia
+    $try('ALTER TABLE responses ADD COLUMN verified INT NOT NULL DEFAULT 1');
+    $try('CREATE INDEX ix_throttle ON throttle (k, at)');
+    if ($v < 6) {
+        // Las encuestas NPS solo admiten respuestas desde el enlace personal del correo
+        q("UPDATE surveys SET is_public = 0 WHERE slug = 'nps' OR title LIKE 'NPS-Q%'");
+    }
+    set_setting('schema', '6');
     if ($v < 4 && function_exists('nps_bilingual_setup')) { try { nps_bilingual_setup(); } catch (Throwable $e) {} }
     try { nps_notify_setup(); } catch (Throwable $e) {}
 }
