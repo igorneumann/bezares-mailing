@@ -97,15 +97,19 @@ function enforce_canonical(): void
     exit;
 }
 
-/** Cabeceras de seguridad. $frame: permitir que la página se muestre dentro de un iframe de otra web. */
+/**
+ * Cabeceras de seguridad. Las páginas solo se pueden mostrar dentro de un iframe de la propia aplicación
+ * (la vista previa de los correos lo necesita); ninguna otra web puede incrustarlas (clickjacking).
+ * $frame: permitir que cualquier web la incruste (formulario de suscripción).
+ */
 function security_headers(bool $frame = false): void
 {
     if (headers_sent()) return;
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
     if (!$frame) {
-        header('X-Frame-Options: DENY');
-        header("Content-Security-Policy: frame-ancestors 'none'");
+        header('X-Frame-Options: SAMEORIGIN');
+        header("Content-Security-Policy: frame-ancestors 'self'");
     }
 }
 

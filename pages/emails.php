@@ -23,7 +23,7 @@ function audience_sql(array $email, array $o): array
 if ($a === 'preview' && $email) {
     $r = render_email($email, sample_contact());
     header('Content-Type: text/html; charset=UTF-8');
-    header("Content-Security-Policy: sandbox allow-popups; script-src 'none'");
+    header("Content-Security-Policy: sandbox allow-popups; script-src 'none'; frame-ancestors 'self'");
     echo $r['html'];
     return;
 }
