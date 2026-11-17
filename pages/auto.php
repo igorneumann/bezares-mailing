@@ -203,12 +203,13 @@ layout_start('Automatización', 'auto'); ?>
 
 <?php
 $subUrl = base_url() . '/subscribe.php';
-$embed = fn(string $lg) => '<iframe src="' . $subUrl . ($lg === 'en' ? '?lang=en' : '') . '" title="Newsletter" style="width:100%;max-width:580px;height:' . (setting('sub_fields', '1') === '1' ? 330 : 190) . 'px;border:0;" loading="lazy"></iframe>';
+$embedH = ['es' => [330, 190], 'en' => [330, 190], 'both' => [470, 320]];
+$embed = fn(string $lg) => '<iframe src="' . $subUrl . ($lg === 'es' ? '' : '?lang=' . $lg) . '" title="Newsletter" style="width:100%;max-width:580px;height:' . $embedH[$lg][setting('sub_fields', '1') === '1' ? 0 : 1] . 'px;border:0;" loading="lazy"></iframe>';
 $pend = (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'pending'");
 ?>
 <div class="card form" id="suscripcion">
   <h2>Formulario de suscripción a la newsletter</h2>
-  <p class="muted">Formulario público en español e inglés, sin cabecera ni marco, para incrustarlo en su web con un iframe. Copie el código del idioma que necesite.<?= $pend ? " Hay <b>$pend</b> contacto(s) pendientes de confirmar." : '' ?></p>
+  <p class="muted">Formulario público en español, en inglés o bilingüe (el visitante marca el boletín en español, el de inglés o los dos), sin cabecera ni marco, para incrustarlo en su web con un iframe. Copie el código del idioma que necesite.<?= $pend ? " Hay <b>$pend</b> contacto(s) pendientes de confirmar." : '' ?></p>
   <div class="cols">
     <div>
       <label>Código para incrustar · Español <a href="<?= e($subUrl) ?>" target="_blank">(ver)</a>
@@ -217,6 +218,9 @@ $pend = (int)val("SELECT COUNT(*) FROM contacts WHERE status = 'pending'");
       <label style="margin-top:1rem">Código para incrustar · English <a href="<?= e($subUrl) ?>?lang=en" target="_blank">(ver)</a>
         <textarea rows="3" readonly onclick="this.select()" class="codebox"><?= e($embed('en')) ?></textarea></label>
       <button type="button" class="btn small" data-copy="<?= e($embed('en')) ?>">Copiar código</button>
+      <label style="margin-top:1rem">Código para incrustar · Bilingüe, con una casilla por boletín <a href="<?= e($subUrl) ?>?lang=both" target="_blank">(ver)</a>
+        <textarea rows="3" readonly onclick="this.select()" class="codebox"><?= e($embed('both')) ?></textarea></label>
+      <button type="button" class="btn small" data-copy="<?= e($embed('both')) ?>">Copiar código</button>
       <p class="muted" style="margin-top:.8rem">El formulario comunica su altura a la página (mensaje <code>bezaresMailingHeight</code>) por si quiere ajustar el iframe automáticamente.</p>
     </div>
     <form method="post" action="index.php?p=auto&a=subsave">

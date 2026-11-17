@@ -67,6 +67,9 @@ campañas automáticas heredan esa configuración.
 `subscribe.php` (español) y `subscribe.php?lang=en` (inglés): formulario limpio, sin cabecera ni marco y con fondo transparente,
 para incrustar con un iframe (el código está en Automatización). Con la doble confirmación, el contacto queda «Pendiente de
 confirmar» hasta que pulsa el enlace del correo. A cada alta se le pone la etiqueta del idioma (`newsletter-es` / `newsletter-en`).
+`subscribe.php?lang=both` es la versión bilingüe: todos los textos en español e inglés y dos casillas, «Boletín en
+español» y «Boletín en inglés»; el alta recibe la etiqueta de cada boletín marcado (hay que marcar al menos uno) y el
+correo de confirmación va en inglés si solo se marca el inglés, y en español en los demás casos.
 
 ### Encuestas en dos idiomas (español e inglés)
 Cada encuesta es una sola y lleva su traducción al inglés (título, textos y preguntas). El correo tiene un campo
