@@ -256,11 +256,56 @@ if ($a === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     redirect('index.php?p=contacts&a=edit&id=' . $id);
 }
+/** Contactos a los que se aplica una acción masiva: los marcados o, si se pide, todos los del filtro actual. */
+function bulk_ids(): array
+{
+    if (!empty($_POST['all_filtered'])) {
+        $_GET = array_intersect_key($_POST, ['q' => 1, 'tag' => 1, 'status' => 1]) + $_GET;
+        [$w, $p] = contact_where();
+        return array_map('intval', array_column(all("SELECT id FROM contacts WHERE $w", $p), 'id'));
+    }
+    return array_values(array_unique(array_filter(array_map('intval', (array)($_POST['ids'] ?? [])))));
+}
+function back_to_list(): string
+{
+    $qs = http_build_query(array_filter(array_intersect_key($_POST, ['q' => 1, 'tag' => 1, 'status' => 1, 'per' => 1, 'page' => 1]), fn($v) => $v !== ''));
+    return 'index.php?p=contacts' . ($qs ? '&' . $qs : '');
+}
+
 if ($a === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $ids = array_filter(array_map('intval', (array)($_POST['ids'] ?? [])));
-    foreach ($ids as $id) q('DELETE FROM contacts WHERE id = ?', [$id]);
-    flash(count($ids) . ' contacto(s) eliminado(s).');
-    redirect('index.php?p=contacts');
+    $ids = bulk_ids();
+    db()->beginTransaction();
+    foreach ($ids as $id) { q('DELETE FROM contacts WHERE id = ?', [$id]); q('DELETE FROM confirmations WHERE contact_id = ?', [$id]); }
+    db()->commit();
+    flash($ids ? count($ids) . ' contacto(s) eliminado(s).' : 'No se ha seleccionado ningún contacto.', $ids ? 'ok' : 'err');
+    redirect(back_to_list());
+}
+
+/* ---------- Añadir o quitar etiquetas a varios contactos ---------- */
+if (($a === 'tagadd' || $a === 'tagdel') && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $ids = bulk_ids();
+    $list = tags_list(tags_pack((string)($_POST['bulk_tags'] ?? '')));
+    if (!$ids) flash('No se ha seleccionado ningún contacto.', 'err');
+    elseif (!$list) flash('Escriba la etiqueta (o varias, separadas por comas).', 'err');
+    else {
+        $changed = 0;
+        db()->beginTransaction();
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            foreach (all("SELECT id, tags FROM contacts WHERE id IN ($in)", $chunk) as $c) {
+                $cur = tags_list($c['tags']);
+                $new = $a === 'tagadd' ? array_merge($cur, $list) : array_diff($cur, $list);
+                $packed = tags_pack($new);
+                if ($packed !== $c['tags']) { q('UPDATE contacts SET tags = ? WHERE id = ?', [$packed, $c['id']]); $changed++; }
+            }
+        }
+        db()->commit();
+        $what = '«' . implode('», «', $list) . '»';
+        flash($a === 'tagadd'
+            ? "Etiqueta $what añadida a $changed contacto(s)" . ($changed < count($ids) ? ' (' . (count($ids) - $changed) . ' ya la tenían)' : '') . '.'
+            : "Etiqueta $what quitada de $changed contacto(s)" . ($changed < count($ids) ? ' (' . (count($ids) - $changed) . ' no la tenían)' : '') . '.');
+    }
+    redirect(back_to_list());
 }
 
 /* ---------- Formulario ---------- */
@@ -322,8 +367,20 @@ layout_start('Contactos', 'contacts'); ?>
     <select name="per" onchange="this.form.submit()"><?php foreach (PER_PAGE_OPTIONS as $n): ?><option value="<?= $n ?>" <?= $per === $n ? 'selected' : '' ?>><?= per_page_label($n) ?></option><?php endforeach ?></select></label>
 </form>
 
-<form method="post" action="index.php?p=contacts&a=delete" onsubmit="return confirm('¿Eliminar los contactos seleccionados?')">
+<form method="post" action="index.php?p=contacts&a=delete" id="bulkform">
 <?= csrf_field() ?>
+<?php foreach (['q', 'tag', 'status', 'per', 'page'] as $k): if (($_GET[$k] ?? '') !== ''): ?><input type="hidden" name="<?= $k ?>" value="<?= e((string)$_GET[$k]) ?>"><?php endif; endforeach ?>
+<div class="bulkbar card" data-bulkbar>
+  <span class="bulkcount"><b data-selcount>0</b> seleccionado(s)</span>
+  <?php if ($total > count($rows)): ?>
+    <label class="check"><input type="checkbox" name="all_filtered" value="1" data-allfiltered> Aplicar a los <?= $total ?> contactos <?= $qs ? 'del filtro' : '' ?> (todas las páginas)</label>
+  <?php endif ?>
+  <input name="bulk_tags" list="taglist" placeholder="Etiqueta (o varias, separadas por comas)" aria-label="Etiquetas">
+  <datalist id="taglist"><?php foreach ($tags as $t => $n): ?><option value="<?= e($t) ?>"><?php endforeach ?></datalist>
+  <button class="btn small primary" formaction="index.php?p=contacts&a=tagadd" data-bulk="add">+ Añadir etiqueta</button>
+  <button class="btn small" formaction="index.php?p=contacts&a=tagdel" data-bulk="del">− Quitar etiqueta</button>
+  <button class="btn small danger" formaction="index.php?p=contacts&a=delete" data-bulk="delete">Eliminar</button>
+</div>
 <div class="card table">
 <table>
   <thead><tr><th class="chk"><input type="checkbox" data-checkall></th><th>Correo</th><th>Nombre</th><th>Empresa</th><th>Etiquetas</th><th>Estado</th><th>Alta</th></tr></thead>
@@ -344,7 +401,6 @@ layout_start('Contactos', 'contacts'); ?>
 </table>
 </div>
 <div class="foot">
-  <button class="btn danger small">Eliminar seleccionados</button>
   <span class="muted"><?= $total ? "Mostrando {$from}–{$to} de {$total} contacto(s)" : '0 contactos' ?></span>
   <?php if ($pages > 1): $link = fn(int $n) => 'index.php?p=contacts&page=' . $n . $perQs . ($qs ? '&' . e($qs) : ''); ?>
   <span class="pager">

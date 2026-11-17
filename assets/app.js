@@ -19,6 +19,30 @@
     const t = b.textContent; b.textContent = 'Copiada ✓'; setTimeout(() => { b.textContent = t; }, 1500);
   }));
 
+  /* ---------- Acciones masivas en el listado de contactos ---------- */
+  const bulk = $('#bulkform');
+  if (bulk) {
+    const bar = $('[data-bulkbar]', bulk), all = $('[data-allfiltered]', bulk);
+    const boxes = () => $$('tbody input[name="ids[]"]', bulk);
+    const update = () => {
+      const n = all && all.checked ? +all.closest('label').textContent.match(/\d+/)[0] : boxes().filter(b => b.checked).length;
+      $('[data-selcount]', bar).textContent = n;
+      bar.classList.toggle('active', n > 0);
+    };
+    bulk.addEventListener('change', update);
+    if (all) all.addEventListener('change', () => { boxes().forEach(b => { b.checked = all.checked; b.disabled = all.checked; }); update(); });
+    $$('[data-bulk]', bar).forEach(btn => btn.addEventListener('click', e => {
+      const n = +$('[data-selcount]', bar).textContent;
+      const tags = $('[name=bulk_tags]', bar).value.trim();
+      if (!n) { e.preventDefault(); alert('Marque primero los contactos en la lista.'); return; }
+      if (btn.dataset.bulk !== 'delete' && !tags) { e.preventDefault(); $('[name=bulk_tags]', bar).focus(); return; }
+      const msg = btn.dataset.bulk === 'delete' ? '¿Eliminar ' + n + ' contacto(s)? No se puede deshacer.'
+        : (btn.dataset.bulk === 'add' ? '¿Añadir «' + tags + '» a ' : '¿Quitar «' + tags + '» de ') + n + ' contacto(s)?';
+      if (!confirm(msg)) e.preventDefault();
+    }));
+    update();
+  }
+
   /* ---------- Editor de correos ----------
      Se hace clic en un elemento (imagen, botón, enlace o texto) y sus opciones aparecen en el panel lateral. */
   const ed = $('.editor');

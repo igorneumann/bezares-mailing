@@ -226,3 +226,10 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 /* Paginación de contactos */
 .perpage{display:flex;align-items:center;gap:.4rem;margin-left:auto;font-size:.9rem;color:var(--muted)}
 .pager .btn.on{background:var(--brand);border-color:var(--brand);color:#fff;cursor:default}
+
+/* Barra de acciones masivas */
+.bulkbar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem .8rem;margin-bottom:.6rem;background:#f8fafb}
+.bulkbar.active{background:#eaf5fb;border-color:#9fc3d6}
+.bulkbar input[name=bulk_tags]{flex:1;min-width:220px;padding:.35rem .6rem}
+.bulkbar .bulkcount{font-size:.9rem;color:var(--muted)}.bulkbar.active .bulkcount{color:var(--brand)}
+.bulkbar label.check{font-size:.85rem;margin:0}
