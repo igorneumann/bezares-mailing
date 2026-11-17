@@ -97,10 +97,85 @@ function enforce_canonical(): void
     exit;
 }
 
+/* ---------- Incrustar la aplicación en otras webs de confianza (p. ej. Nextcloud) ---------- */
+
+/**
+ * Valida y normaliza un origen para frame-ancestors: https://host[:puerto] o https://*.dominio.
+ * Acepta que se pegue la dirección completa (se queda solo con el dominio) o sin https://. Devuelve '' si no es válida.
+ */
+function normalize_origin(string $s): string
+{
+    $s = strtolower(trim($s));
+    if ($s === '' || preg_match('/[\s\'";,]/', $s)) return '';
+    if (!preg_match('#^[a-z][a-z0-9+.-]*://#', $s)) $s = 'https://' . $s;
+    $p = parse_url(str_replace('://*.', '://wildcard-x.', $s));
+    if (!$p || !in_array($p['scheme'] ?? '', ['http', 'https'], true) || empty($p['host']) || isset($p['user'])) return '';
+    $host = str_replace('wildcard-x.', '*.', $p['host']);
+    if (!preg_match('/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$|^\[[0-9a-f:]+\]$/', $host)) return '';
+    return $p['scheme'] . '://' . $host . (isset($p['port']) ? ':' . $p['port'] : '');
+}
+/** Webs que pueden mostrar la aplicación dentro de un iframe (Ajustes → URLs de confianza). */
+function frame_origins(): array
+{
+    if (!cfg()) return [];
+    $out = [];
+    foreach (preg_split('/[\s,]+/', (string)setting('frame_origins'), -1, PREG_SPLIT_NO_EMPTY) as $o) {
+        if (($n = normalize_origin($o)) !== '') $out[$n] = true;
+    }
+    return array_keys($out);
+}
+/** Valor de frame-ancestors: la propia aplicación y las webs de confianza. */
+function frame_ancestors(): string
+{
+    return trim("'self' " . implode(' ', frame_origins()));
+}
+/** «Sitio» aproximado de un host (los dos últimos niveles: mailing.bezares.com → bezares.com). */
+function site_of(string $host): string
+{
+    $host = strtolower(trim($host, '[]'));
+    if (filter_var($host, FILTER_VALIDATE_IP)) return $host;
+    $parts = explode('.', preg_replace('/^\*\./', '', $host));
+    return implode('.', array_slice($parts, -2));
+}
+/**
+ * true si alguna web de confianza es de OTRO sitio que la aplicación (p. ej. Nextcloud en otro dominio).
+ * Entonces el navegador no envía las cookies normales dentro del iframe y hay que usar SameSite=None.
+ */
+function cross_site_embedding(): bool
+{
+    $base = (string)(cfg() ? setting('base_url') : '');
+    $mine = site_of((string)parse_url($base, PHP_URL_HOST));
+    foreach (frame_origins() as $o) {
+        if (site_of((string)parse_url(str_replace('*.', 'x.', $o), PHP_URL_HOST)) !== $mine) return true;
+    }
+    return false;
+}
+/** SameSite de las cookies: None (con Secure y Partitioned) solo si hace falta para incrustar desde otro sitio por HTTPS. */
+function cookie_samesite(): string
+{
+    return cross_site_embedding() && base_is_https() ? 'None' : 'Lax';
+}
+/** Añade «Partitioned» (CHIPS) a las cookies de la aplicación para que funcionen en iframes de otros sitios. */
+function partition_cookies(): void
+{
+    static $done = false;
+    if ($done || cookie_samesite() !== 'None') return;
+    $done = true;
+    header_register_callback(function () {
+        $cookies = [];
+        foreach (headers_list() as $h) {
+            if (stripos($h, 'Set-Cookie:') === 0) $cookies[] = trim(substr($h, 11));
+        }
+        if (!$cookies) return;
+        header_remove('Set-Cookie');
+        foreach ($cookies as $c) header('Set-Cookie: ' . $c . (stripos($c, 'partitioned') === false ? '; Partitioned' : ''), false);
+    });
+}
+
 /**
  * Cabeceras de seguridad. Las páginas solo se pueden mostrar dentro de un iframe de la propia aplicación
- * (la vista previa de los correos lo necesita); ninguna otra web puede incrustarlas (clickjacking).
- * $frame: permitir que cualquier web la incruste (formulario de suscripción).
+ * (la vista previa de los correos) o de las URLs de confianza de Ajustes (p. ej. Nextcloud); ninguna otra web
+ * puede incrustarlas (clickjacking). $frame: permitir que cualquier web la incruste (formulario de suscripción).
  */
 function security_headers(bool $frame = false): void
 {
@@ -108,8 +183,9 @@ function security_headers(bool $frame = false): void
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
     if (!$frame) {
-        header('X-Frame-Options: SAMEORIGIN');
-        header("Content-Security-Policy: frame-ancestors 'self'");
+        // X-Frame-Options no admite una lista de webs: si hay URLs de confianza, manda solo frame-ancestors
+        if (!frame_origins()) header('X-Frame-Options: SAMEORIGIN');
+        header('Content-Security-Policy: frame-ancestors ' . frame_ancestors());
     }
 }
 

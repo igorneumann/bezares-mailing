@@ -173,7 +173,10 @@ function start_session(): void
     ini_set('session.use_only_cookies', '1');
     session_name('bzmailing');
     // Secure siempre que la dirección configurada sea https, aunque PHP no detecte bien el HTTPS detrás de un proxy
-    session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'path' => cookie_path(), 'secure' => base_is_https() || is_https()]);
+    // SameSite=None solo si la aplicación se incrusta desde otro sitio de confianza (Ajustes → URLs de confianza)
+    $ss = cookie_samesite();
+    session_set_cookie_params(['httponly' => true, 'samesite' => $ss, 'path' => cookie_path(), 'secure' => $ss === 'None' || base_is_https() || is_https()]);
+    partition_cookies();
     session_start();
 }
 /* ---------- "Mantener la sesión iniciada" ----------
@@ -183,8 +186,10 @@ const REMEMBER_COOKIE = 'bzmailing_rec';
 const REMEMBER_DAYS = 30;
 function remember_cookie(string $value, int $expires): void
 {
-    setcookie(REMEMBER_COOKIE, $value, ['expires' => $expires, 'path' => cookie_path(), 'httponly' => true, 'samesite' => 'Lax',
-        'secure' => base_is_https() || is_https()]);
+    $ss = cookie_samesite();
+    setcookie(REMEMBER_COOKIE, $value, ['expires' => $expires, 'path' => cookie_path(), 'httponly' => true, 'samesite' => $ss,
+        'secure' => $ss === 'None' || base_is_https() || is_https()]);
+    partition_cookies();
 }
 function remember_sign(array $user, int $exp): string
 {

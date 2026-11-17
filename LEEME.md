@@ -92,6 +92,10 @@ títulos de los bloques «Artículo» y «2 columnas»; con menos de 2 titulares
 - **HTTPS**: con una dirección `https://` las cookies llevan siempre `Secure`, y «Forzar HTTPS» redirige http → https y
   activa HSTS. Detrás de un proxy inverso, declare su IP en `data/config.php`:
   `'trusted_proxies' => ['10.0.0.5'],`. Solo entonces se aceptan `X-Forwarded-Proto` y `X-Forwarded-For`.
+- **Incrustar en otras webs (Nextcloud…)**: por defecto el panel solo se puede mostrar dentro de la propia aplicación.
+  En Ajustes → «URLs de confianza» se indican las webs que sí pueden incrustarlo (por ejemplo `https://cloud.bezares.com`
+  para la app «External sites» de Nextcloud). Si esa web está en otro dominio, las cookies de sesión pasan a
+  `SameSite=None; Secure; Partitioned` para que el inicio de sesión funcione dentro del marco (requiere https).
 - **Carpeta de datos**: la base de datos SQLite y los archivos de importación pueden guardarse fuera de la carpeta pública
   (opción del instalador; queda en `data/config.php` como `'data_dir'`). Si se quedan en `data/`, el servidor debe
   bloquearla: `.htaccess` en Apache, `nginx.conf.example` en Nginx. Ajustes → Seguridad del servidor lo comprueba

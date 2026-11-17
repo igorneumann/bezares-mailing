@@ -20,6 +20,18 @@ if ($a === 'save' && $isPost) {
     if (isset($_POST['contacts_per_page']) && in_array((int)$_POST['contacts_per_page'], PER_PAGE_OPTIONS, true)) set_setting('contacts_per_page', (string)(int)$_POST['contacts_per_page']);
     $https = str_starts_with((string)setting('base_url'), 'https://');
     set_setting('force_https', $https && !empty($_POST['force_https']) ? '1' : '0');
+    // URLs de confianza que pueden incrustar la aplicación (Nextcloud, intranet…)
+    if (isset($_POST['frame_origins'])) {
+        $ok = []; $bad = [];
+        foreach (preg_split('/[\r\n,]+/', (string)$_POST['frame_origins'], -1, PREG_SPLIT_NO_EMPTY) as $o) {
+            if (trim($o) === '') continue;
+            $n = normalize_origin($o);
+            if ($n !== '') $ok[$n] = true; else $bad[] = $o;
+        }
+        set_setting('frame_origins', implode("\n", array_keys($ok)));
+        if ($bad) $msg .= ' Se ignoraron estas URLs de confianza no válidas (una por línea, por ejemplo https://cloud.bezares.com): ' . implode(', ', $bad) . '.';
+        if ($ok && cross_site_embedding() && !$https) $msg .= ' Para incrustar desde otro dominio la aplicación tiene que usar https://.';
+    }
     if (!empty($_POST['force_https']) && !$https) $msg .= ' «Forzar HTTPS» requiere que la dirección empiece por https://.';
     $f = $_FILES['logo'] ?? null;
     if ($f && $f['error'] === UPLOAD_ERR_OK) {
@@ -83,6 +95,9 @@ layout_start('Ajustes', 'settings'); ?>
     <label>Texto de baja (el texto entre [corchetes] será el enlace)<input name="unsub_text" value="<?= $s('unsub_text') ?>"></label>
     <label>Dirección web de esta aplicación<input type="url" name="base_url" value="<?= e(base_url()) ?>" required></label>
     <label class="check"><input type="checkbox" name="force_https" <?= setting('force_https') === '1' ? 'checked' : '' ?> <?= str_starts_with(base_url(), 'https://') ? '' : 'disabled' ?>> Forzar HTTPS (redirige http → https y activa HSTS)</label>
+    <label>URLs de confianza que pueden incrustar la aplicación (una por línea)
+      <textarea name="frame_origins" rows="2" placeholder="https://cloud.bezares.com"><?= e(implode("\n", frame_origins())) ?></textarea></label>
+    <p class="muted" style="margin-top:-.5rem">Por ejemplo, la dirección de su Nextcloud para mostrar la aplicación con la app «External sites». Puede pegar la dirección completa: se guarda solo el dominio. Admite <code>https://*.bezares.com</code>. Las demás webs no pueden incrustarla.<?= frame_origins() && cookie_samesite() === 'None' ? ' Como están en otro dominio, las cookies de sesión se envían en modo «SameSite=None; Partitioned» para que el inicio de sesión funcione dentro del marco.' : '' ?></p>
     <?php if (!str_starts_with(base_url(), 'https://')): ?><p class="muted" style="color:#a12626">La dirección usa http: las contraseñas y las cookies viajan sin cifrar. Active un certificado en el hosting y cambie la dirección a https://.</p><?php endif ?>
     <h3>Redes sociales (temas Newsletter y Destacado)</h3>
     <div class="row2">
