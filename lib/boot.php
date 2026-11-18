@@ -9,6 +9,14 @@ ini_set('display_errors', '0');
 
 require_once __DIR__ . '/security.php';
 
+/* Ninguna respuesta de la aplicación se puede guardar en caché: hay hostings (Plesk con «caché de nginx») que, si no
+   se indica, sirven la respuesta guardada sin ejecutar PHP, y entonces cron.php no hace nada, las aperturas no se
+   cuentan y los enlaces de baja o de encuesta muestran páginas viejas. Cada página puede cambiarlo si lo necesita. */
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('Cache-Control: no-store, no-cache, must-revalidate, private, max-age=0');
+    header('X-Accel-Expires: 0'); // nginx como proxy: no guardar en su caché
+}
+
 /* ---------- Configuración y base de datos ---------- */
 
 function cfg(): ?array

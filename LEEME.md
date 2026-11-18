@@ -92,6 +92,11 @@ El tema «Bezares · Newsletter» muestra al principio un índice automático co
 del correo (2 a la izquierda, logo en el centro, 2 a la derecha), cada uno con su enlace. Se toma de los
 títulos de los bloques «Artículo» y «2 columnas»; con menos de 2 titulares no se muestra.
 
+## Caché del hosting
+Todas las respuestas llevan `Cache-Control: no-store` y `X-Accel-Expires: 0`. En Plesk conviene además desactivar
+«Activar el almacenamiento en caché de nginx» (Sitios web → dominio → Configuración de Apache y nginx): con esa caché
+activa y versiones anteriores a la 2.16.1, cron.php devolvía la respuesta guardada sin ejecutarse.
+
 ## Seguridad
 
 - **Dirección fija**: la dirección de la aplicación se indica al instalar y queda en `data/config.php`
