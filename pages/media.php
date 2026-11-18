@@ -37,6 +37,19 @@ if ($a === 'localize' && $isPost) {
     if ($r['errors']) flash('No se pudieron copiar: ' . implode(' · ', $r['errors']), 'err');
     redirect('index.php?p=media');
 }
+/* Imágenes que ya están en la biblioteca pero los correos las piden a la dirección antigua (cambio de dominio):
+   solo se cambia la dirección, sin copiar nada. */
+if ($a === 'rebase' && $isPost) {
+    $ok = 0; $mails = 0;
+    foreach (array_intersect(array_map('strval', (array)($_POST['urls'] ?? [])), array_keys(media_external_urls())) as $u) {
+        $name = media_relocatable($u);
+        if ($name === '') continue;
+        $mails += media_replace_url($u, media_url($name));
+        $ok++;
+    }
+    flash($ok ? "Dirección actualizada en $ok imagen(es) ($mails cambio(s) en correos): ahora se cargan desde " . base_url() . '.' : 'No había nada que actualizar.');
+    redirect('index.php?p=media');
+}
 if ($a === 'delete' && $isPost) {
     $name = basename((string)($_POST['name'] ?? ''));
     $path = media_dir() . '/' . $name;
@@ -49,10 +62,26 @@ if ($a === 'delete' && $isPost) {
 
 $items = media_list();
 $external = media_external_urls();
+// Separar las que ya están en la biblioteca (solo hay que cambiar la dirección) de las de otras webs
+$relocate = [];
+foreach ($external as $u => $names) if (media_relocatable($u) !== '') { $relocate[$u] = $names; unset($external[$u]); }
 $writable = is_writable(media_dir());
 layout_start('Biblioteca', 'media'); ?>
 <div class="head"><h1>Biblioteca <small><?= count($items) ?> archivo(s): imágenes y documentos para adjuntar</small></h1></div>
 <?php if (!$writable): ?><div class="flash err">La carpeta <code>uploads</code> no tiene permisos de escritura.</div><?php endif ?>
+
+<?php if ($relocate): $oldHosts = array_unique(array_map(fn($u) => (string)parse_url($u, PHP_URL_HOST), array_keys($relocate))); ?>
+<form method="post" action="index.php?p=media&a=rebase" class="card warnbox">
+  <?= csrf_field() ?>
+  <h2>Imágenes con la dirección antigua</h2>
+  <p class="muted">Estas imágenes ya están en su biblioteca, pero los correos las cargan desde <b><?= e(implode(', ', $oldHosts)) ?></b>. Actualice la dirección para que se carguen desde <b><?= e((string)parse_url(base_url(), PHP_URL_HOST)) ?></b>; no se copia ningún archivo.</p>
+  <?php foreach ($relocate as $u => $names): ?>
+    <label class="check ext"><input type="checkbox" name="urls[]" value="<?= e($u) ?>" checked>
+      <span><b><?= e((string)parse_url($u, PHP_URL_HOST)) ?></b><?= e((string)parse_url($u, PHP_URL_PATH)) ?> → <?= e(media_relocatable($u)) ?> <span class="muted">— <?= e(implode(', ', array_unique($names))) ?></span></span></label>
+  <?php endforeach ?>
+  <p><button class="btn primary">Actualizar la dirección</button></p>
+</form>
+<?php endif ?>
 
 <?php if ($external): ?>
 <form method="post" action="index.php?p=media&a=localize" class="card warnbox">

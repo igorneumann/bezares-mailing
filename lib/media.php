@@ -217,12 +217,44 @@ function media_external_urls(): array
         if (preg_match_all('/<img\b[^>]*\bsrc\s*=\s*"([^"]+)"/i', (string)$e['body'], $m)) $urls = array_merge($urls, $m[1]);
         foreach (array_unique($urls) as $u) {
             $u = html_entity_decode($u, ENT_QUOTES, 'UTF-8');
-            if (!preg_match('#^https?://#i', $u) || str_starts_with($u, $own) || str_contains($u, 'placehold.co')) continue;
+            if (!preg_match('#^https?://#i', $u) || str_contains($u, 'placehold.co')) continue;
+            // Las de esta misma dirección solo se avisan si no existen aquí (p. ej. rutas del sistema anterior
+            // en el mismo dominio, como /media/images/…, que este ya no sirve)
+            if (str_starts_with($u, $own) && !preg_match('#^' . preg_quote($own, '#') . '(media/images/|mautic/)#i', $u)) continue;
             $out[$u][] = $e['name'];
         }
     }
     ksort($out);
     return $out;
+}
+
+/**
+ * Si la URL es de un archivo de esta biblioteca servido desde otra dirección (p. ej. la anterior a un cambio de
+ * dominio: https://mailing2.bezares.com/uploads/foto.png) devuelve el nombre del archivo; si no, ''.
+ */
+function media_relocatable(string $u): string
+{
+    $path = (string)parse_url($u, PHP_URL_PATH);
+    $sameHost = strtolower((string)parse_url($u, PHP_URL_HOST)) === strtolower((string)parse_url(base_url(), PHP_URL_HOST));
+    // En otro host, solo rutas /uploads/archivo (como las de esta aplicación); en el propio, cualquier ruta antigua
+    if (!preg_match($sameHost ? '#/([^/]+)$#' : '#/uploads/([^/]+)$#', $path, $m)) return '';
+    $name = basename(rawurldecode($m[1]));
+    return $name !== '' && $name[0] !== '.' && is_file(media_dir() . '/' . $name) ? $name : '';
+}
+
+/** Cambia en los correos una URL por otra (cabecera y cuerpo, también en su forma con entidades HTML). */
+function media_replace_url(string $old, string $new): int
+{
+    $n = 0;
+    foreach (all('SELECT id, header_image, body FROM emails') as $e) {
+        $body = str_replace([$old, e($old)], [$new, e($new)], (string)$e['body']);
+        $head = $e['header_image'] === $old ? $new : $e['header_image'];
+        if ($body !== (string)$e['body'] || $head !== $e['header_image']) {
+            q('UPDATE emails SET body = ?, header_image = ? WHERE id = ?', [$body, $head, $e['id']]);
+            $n++;
+        }
+    }
+    return $n;
 }
 
 /** Copia a la biblioteca las imágenes indicadas y actualiza los correos que las usan. */
@@ -231,13 +263,7 @@ function media_localize(array $urls): array
     $res = ['ok' => 0, 'errors' => []];
     foreach (array_unique($urls) as $u) {
         try {
-            $new = media_url(media_fetch_url($u));
-            foreach (all('SELECT id, header_image, body FROM emails') as $e) {
-                $body = str_replace([$u, e($u)], $new, (string)$e['body']);
-                $head = $e['header_image'] === $u ? $new : $e['header_image'];
-                if ($body !== (string)$e['body'] || $head !== $e['header_image'])
-                    q('UPDATE emails SET body = ?, header_image = ? WHERE id = ?', [$body, $head, $e['id']]);
-            }
+            media_replace_url($u, media_url(media_fetch_url($u)));
             $res['ok']++;
         } catch (Throwable $e) {
             $res['errors'][] = basename((string)parse_url($u, PHP_URL_PATH)) . ': ' . $e->getMessage();
