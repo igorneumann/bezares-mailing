@@ -1,0 +1,7 @@
+# Datos de cada instalación: nunca al repositorio
+/data/config.php
+/data/*.sqlite*
+/data/import-*
+/uploads/*
+!/uploads/.htaccess
+!/uploads/index.html
