@@ -103,6 +103,7 @@ function schema_sql(string $driver): array
         "nps_runs (id $pk, label VARCHAR(60) NOT NULL UNIQUE, email_id INT, survey_id INT, reminder_email_id INT, send_id INT,
             tag VARCHAR(190) NOT NULL DEFAULT '', sent_at VARCHAR(19) NOT NULL, reminder_at VARCHAR(19), results_at VARCHAR(19),
             reminder_done INT NOT NULL DEFAULT 0, results_done INT NOT NULL DEFAULT 0, note VARCHAR(500), email_en_id INT, send_en_id INT)",
+        "remember_tokens (id $pk, user_id INT NOT NULL, selector VARCHAR(24) NOT NULL UNIQUE, hash VARCHAR(64) NOT NULL, expires INT NOT NULL)",
     ];
     $sql = [];
     foreach ($t as $def) $sql[] = "CREATE TABLE IF NOT EXISTS $def$end";
@@ -115,6 +116,7 @@ function schema_sql(string $driver): array
     $sql[] = "CREATE INDEX ix_queue_sent ON queue (sent_at)";
     $sql[] = "CREATE INDEX ix_clicks_queue ON clicks (queue_id)";
     $sql[] = "CREATE INDEX ix_questions_survey ON questions (survey_id)";
+    $sql[] = "CREATE INDEX ix_remember_user ON remember_tokens (user_id)";
     return $sql;
 }
 
@@ -229,8 +231,9 @@ function start_session(): void
     session_start();
 }
 /* ---------- "Mantener la sesión iniciada" ----------
-   Cookie firmada (30 días) con el usuario, la caducidad y una firma que depende de la clave secreta
-   y de la contraseña: al cambiar la contraseña, todas las sesiones recordadas dejan de valer. */
+   Cada navegador recordado tiene su ficha en la tabla remember_tokens (30 días): la cookie lleva un identificador y
+   un secreto, y en la base de datos solo se guarda el hash del secreto. Cerrar sesión borra la ficha de ese navegador
+   y cambiar la contraseña borra todas las del usuario, así una cookie copiada deja de valer en el momento. */
 const REMEMBER_COOKIE = 'bzmailing_rec';
 const REMEMBER_DAYS = 30;
 function remember_cookie(string $value, int $expires): void
@@ -240,26 +243,73 @@ function remember_cookie(string $value, int $expires): void
         'secure' => $ss === 'None' || base_is_https() || is_https()]);
     partition_cookies();
 }
-function remember_sign(array $user, int $exp): string
+/** [identificador, secreto] de la cookie actual, o null si no tiene el formato esperado. */
+function remember_parts(): ?array
 {
-    return hash_hmac('sha256', $user['id'] . '|' . $exp . '|' . $user['pass_hash'], cfg()['secret']);
+    $parts = explode('.', (string)($_COOKIE[REMEMBER_COOKIE] ?? ''));
+    if (count($parts) !== 2 || !preg_match('/^[a-f0-9]{18}$/', $parts[0]) || !preg_match('/^[a-f0-9]{64}$/', $parts[1])) return null;
+    return $parts;
 }
 function remember_set(array $user): void
 {
+    remember_forget_current();
     $exp = time() + REMEMBER_DAYS * 86400;
-    remember_cookie($user['id'] . '.' . $exp . '.' . remember_sign($user, $exp), $exp);
+    $selector = token(9);
+    $secret = token(32);
+    q('DELETE FROM remember_tokens WHERE expires < ?', [time()]);
+    q('INSERT INTO remember_tokens (user_id, selector, hash, expires) VALUES (?, ?, ?, ?)',
+        [(int)$user['id'], $selector, hash('sha256', $secret), $exp]);
+    remember_cookie($selector . '.' . $secret, $exp);
+    if (session_status() === PHP_SESSION_ACTIVE) $_SESSION['rs'] = $selector;
+}
+/** Borra la ficha de este navegador (si la tiene). */
+function remember_forget_current(): void
+{
+    if ($p = remember_parts()) { try { q('DELETE FROM remember_tokens WHERE selector = ?', [$p[0]]); } catch (Throwable $e) {} }
 }
 function remember_clear(): void
 {
+    remember_forget_current();
     if (isset($_COOKIE[REMEMBER_COOKIE])) remember_cookie('', time() - 3600);
 }
-/** Devuelve el id del usuario si la cookie es válida. */
+/** Cierra todos los navegadores recordados del usuario (al cambiar la contraseña). */
+function remember_revoke_all(int $uid): void
+{
+    q('DELETE FROM remember_tokens WHERE user_id = ?', [$uid]);
+}
+/** Devuelve el id del usuario si la cookie corresponde a una ficha vigente. */
 function remember_check(): ?int
 {
-    $parts = explode('.', (string)($_COOKIE[REMEMBER_COOKIE] ?? ''));
-    if (count($parts) !== 3 || !ctype_digit($parts[0]) || !ctype_digit($parts[1]) || (int)$parts[1] < time()) return null;
-    $u = one('SELECT * FROM users WHERE id = ?', [(int)$parts[0]]);
-    return $u && hash_equals(remember_sign($u, (int)$parts[1]), $parts[2]) ? (int)$u['id'] : null;
+    if (!($p = remember_parts())) return null;
+    $r = one('SELECT user_id, hash, expires FROM remember_tokens WHERE selector = ?', [$p[0]]);
+    if (!$r || (int)$r['expires'] < time() || !hash_equals((string)$r['hash'], hash('sha256', $p[1]))) return null;
+    return one('SELECT id FROM users WHERE id = ?', [(int)$r['user_id']]) ? (int)$r['user_id'] : null;
+}
+
+/* ---------- Sesión iniciada ----------
+   La sesión guarda una huella de la contraseña: si la contraseña cambia, las demás sesiones abiertas dejan de valer.
+   Si la sesión se abrió con «mantener la sesión iniciada», guarda también su ficha ('rs'): al cerrar sesión en ese
+   navegador se borra la ficha y cae cualquier otra sesión abierta con una copia de la cookie. */
+function pass_tag(array $user): string
+{
+    return substr(hash_hmac('sha256', 'session|' . $user['id'] . '|' . $user['pass_hash'], cfg()['secret']), 0, 32);
+}
+function login_user(array $user): void
+{
+    session_regenerate_id(true);
+    $_SESSION['uid'] = (int)$user['id'];
+    $_SESSION['pw'] = pass_tag($user);
+    unset($_SESSION['rs']); // remember_set() la pone si se marca «mantener la sesión iniciada»
+}
+/** true si la sesión sigue siendo válida (el usuario existe y no ha cambiado la contraseña desde que se abrió). */
+function session_valid(): bool
+{
+    $u = one('SELECT * FROM users WHERE id = ?', [(int)($_SESSION['uid'] ?? 0)]);
+    if (!$u) return false;
+    if (!empty($_SESSION['rs']) && !val('SELECT 1 FROM remember_tokens WHERE selector = ?', [(string)$_SESSION['rs']])) return false;
+    // Sesiones abiertas antes de esta versión: se les pone la huella actual
+    if (empty($_SESSION['pw'])) { $_SESSION['pw'] = pass_tag($u); return true; }
+    return hash_equals(pass_tag($u), (string)$_SESSION['pw']);
 }
 
 function valid_email(string $s): bool { return (bool)filter_var($s, FILTER_VALIDATE_EMAIL); }

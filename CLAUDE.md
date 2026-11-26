@@ -18,7 +18,7 @@ El usuario (Igor) escribe en español: responder en español.
 - `data/` (NO está en git): `config.php` (secreto, `base_url`, BD) y la base SQLite. No subir nunca a GitHub.
 
 ## Convenciones
-- Esquema versionado en `migrate()` (lib/media.php), ahora v10. Cada cambio de esquema: añadir columnas en el CREATE
+- Esquema versionado en `migrate()` (lib/media.php), ahora v11. Cada cambio de esquema: añadir columnas en el CREATE
   de `lib/boot.php` y un paso `$try('ALTER ...')` + `set_setting('schema', 'N')`.
 - Seguridad: CSRF en todos los POST, `e()` para escapar, enlaces públicos firmados con `sign()`, consultas con parámetros.
 - Correos: el color de botones va en la celda (`bgcolor`) para Outlook; nada de flexbox; clase `mstack`/`col2` para

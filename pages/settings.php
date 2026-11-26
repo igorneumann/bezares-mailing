@@ -50,9 +50,26 @@ if ($a === 'save' && $isPost) {
             else $msg = 'Ajustes guardados, pero no se pudo guardar el logo (permisos de la carpeta uploads).';
         } else $msg = 'Ajustes guardados, pero el logo debe ser PNG, JPG o GIF.';
     }
-    if (($_POST['newpass'] ?? '') !== '') {
-        if (strlen($_POST['newpass']) < 8) $msg .= ' La contraseña no se cambió: mínimo 8 caracteres.';
-        else { q('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($_POST['newpass'], PASSWORD_DEFAULT), $_SESSION['uid']]); if (isset($_COOKIE[REMEMBER_COOKIE])) remember_set(one('SELECT * FROM users WHERE id = ?', [$_SESSION['uid']])); $msg .= ' Contraseña cambiada.'; }
+    if (($new = (string)($_POST['newpass'] ?? '')) !== '') {
+        // Cambiar la contraseña exige la actual (límite de intentos) y cierra las demás sesiones y navegadores recordados
+        $uid = (int)$_SESSION['uid'];
+        $pwKey = 'pwchange:' . $uid;
+        $user = one('SELECT * FROM users WHERE id = ?', [$uid]);
+        if (strlen($new) < 8) $msg .= ' La contraseña no se cambió: mínimo 8 caracteres.';
+        elseif (!throttle_ok($pwKey, 5, 3600)) $msg .= ' La contraseña no se cambió: demasiados intentos con la contraseña actual incorrecta. Espere una hora.';
+        elseif (!$user || !password_verify((string)($_POST['curpass'] ?? ''), $user['pass_hash'])) {
+            throttle_hit($pwKey);
+            $msg .= ' La contraseña no se cambió: la contraseña actual no es correcta.';
+        } else {
+            q('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $uid]);
+            throttle_clear($pwKey);
+            $remembered = remember_parts() !== null;
+            remember_revoke_all($uid);
+            $user = one('SELECT * FROM users WHERE id = ?', [$uid]);
+            login_user($user); // esta sesión sigue abierta con la nueva huella; las demás quedan cerradas
+            if ($remembered) remember_set($user);
+            $msg .= ' Contraseña cambiada. Se han cerrado las sesiones abiertas en otros navegadores.';
+        }
     }
     flash($msg);
     redirect('index.php?p=settings');
@@ -164,6 +181,9 @@ layout_start('Ajustes', 'settings'); ?>
     </div>
     <p class="muted">«Todos» muestra el listado completo en una sola página; con muchos miles de contactos puede tardar en cargar.</p>
     <h3>Cambiar contraseña de acceso</h3>
+    <p class="muted">Al cambiarla se cierran las sesiones abiertas en otros navegadores.</p>
+    <label>Contraseña actual<input type="password" name="curpass" id="curpass" autocomplete="current-password"></label>
+    <label class="check showpass"><input type="checkbox" data-showpass="#curpass"> Mostrar contraseña</label>
     <label>Nueva contraseña (<?= e($me) ?>)<input type="password" name="newpass" id="newpass" minlength="8" autocomplete="new-password"></label>
     <label class="check showpass"><input type="checkbox" data-showpass="#newpass"> Mostrar contraseña</label>
   </div>

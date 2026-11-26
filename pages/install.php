@@ -51,6 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         file_put_contents($dataDir . '/config.php', "<?php\nreturn " . var_export($c, true) . ";\n", LOCK_EX);
         if (function_exists('opcache_invalidate')) @opcache_invalidate($dataDir . '/config.php', true);
+        // Aquí cfg() todavía no tiene la configuración recién escrita: la huella de la sesión se añade en la siguiente petición
+        session_regenerate_id(true);
         $_SESSION['uid'] = (int)val('SELECT id FROM users WHERE email = ?', [$email]);
         flash('Instalación completada. Configure ahora el servidor de envío y revise «Seguridad del servidor».');
         redirect('index.php?p=settings');

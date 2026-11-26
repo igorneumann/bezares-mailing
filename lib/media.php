@@ -288,7 +288,7 @@ function media_usage(string $name): array
 function migrate(): void
 {
     $v = (int)setting('schema', '1');
-    if ($v >= 10) return;
+    if ($v >= 11) return;
     $try = function (string $sql) { try { db()->exec($sql); } catch (Throwable $e) { /* ya existe */ } };
     if ($v < 2) $try('ALTER TABLE emails ADD COLUMN attachments TEXT');
     // v3: tabla de campañas NPS automáticas (CREATE TABLE IF NOT EXISTS del esquema completo)
@@ -336,6 +336,9 @@ function migrate(): void
     $try('ALTER TABLE surveys ADD COLUMN thank_min INT NOT NULL DEFAULT 0');
     if ($v < 10) { try { thanks_seed(); } catch (Throwable $e) {} }
     set_setting('schema', '10');
+    // v11: «Mantener la sesión iniciada» con fichas en la base de datos (la tabla la crea el CREATE TABLE de arriba)
+    $try('CREATE INDEX ix_remember_user ON remember_tokens (user_id)');
+    set_setting('schema', '11');
     if ($v < 4 && function_exists('nps_bilingual_setup')) { try { nps_bilingual_setup(); } catch (Throwable $e) {} }
     try { nps_notify_setup(); } catch (Throwable $e) {}
 }

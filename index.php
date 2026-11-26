@@ -16,7 +16,12 @@ $p = (string)($_GET['p'] ?? '');
 $a = (string)($_GET['a'] ?? 'list');
 
 if ($p === 'logout') { $_SESSION = []; session_destroy(); remember_clear(); redirect('index.php'); }
-if (empty($_SESSION['uid']) && ($uid = remember_check())) { session_regenerate_id(true); $_SESSION['uid'] = $uid; }
+// Sesión de un usuario borrado o abierta antes de un cambio de contraseña: se cierra
+if (!empty($_SESSION['uid']) && !session_valid()) { $_SESSION = []; session_regenerate_id(true); }
+if (empty($_SESSION['uid']) && ($uid = remember_check())) {
+    login_user(one('SELECT * FROM users WHERE id = ?', [$uid]));
+    $_SESSION['rs'] = remember_parts()[0]; // la sesión depende de esa ficha: si se borra, se cierra
+}
 if (empty($_SESSION['uid'])) { require __DIR__ . '/pages/login.php'; exit; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST') csrf_check();
 

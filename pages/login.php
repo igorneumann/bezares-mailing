@@ -23,8 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ok = password_verify((string)($_POST['pass'] ?? ''), $u['pass_hash'] ?? '$2y$10$ye7XXaUNHN2gv2f57GZNE.xDbMpSdEjyziXmn2dIf4A3mVyECrY8y');
         if ($u && $ok) {
             throttle_clear($acct);
-            session_regenerate_id(true);
-            $_SESSION['uid'] = $u['id'];
+            login_user($u);
             if (!empty($_POST['remember'])) remember_set($u); else remember_clear();
             redirect('index.php');
         }
