@@ -102,6 +102,35 @@ function media_store_upload(array $f, bool $allowDocs = true): string
     return $name;
 }
 
+/* ---------- Imágenes de cabecera ----------
+   En la Biblioteca se marcan las imágenes que sirven de cabecera de las newsletters (ajuste header_images, lista de
+   nombres de archivo); el generador solo ofrece esas. La cabecera por defecto (NEWSLETTER_HEADER) lo es siempre. */
+
+/** Nombres marcados como cabecera (pueden incluir archivos que ya no existen). */
+function header_names(): array
+{
+    $list = json_decode(setting('header_images'), true);
+    $out = [];
+    foreach (is_array($list) ? $list : [] as $n) if (($n = basename((string)$n)) !== '') $out[$n] = true;
+    return array_keys($out);
+}
+function is_header_image(string $name): bool
+{
+    return $name === NEWSLETTER_HEADER || in_array($name, header_names(), true);
+}
+/** Marca o desmarca una imagen como cabecera. */
+function header_set(string $name, bool $on): void
+{
+    $list = array_values(array_diff(header_names(), [$name]));
+    if ($on) $list[] = $name;
+    set_setting('header_images', json_encode($list, JSON_UNESCAPED_UNICODE));
+}
+/** Imágenes de la biblioteca marcadas como cabecera (solo las que existen), las más recientes primero. */
+function header_images(): array
+{
+    return array_values(array_filter(media_list('image'), fn($m) => is_header_image($m['name'])));
+}
+
 /* ---------- Adjuntos de los correos ---------- */
 
 /** Nombres de archivo adjuntos a un correo (solo los que siguen existiendo en la biblioteca). */

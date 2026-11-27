@@ -410,7 +410,7 @@ function layout_start(string $title, string $active): void
     ?><!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= e($title) ?> · Bezares Mailing</title>
-<link rel="icon" href="assets/favicon.png"><link rel="stylesheet" href="assets/app.css">
+<link rel="icon" href="assets/favicon.png"><link rel="stylesheet" href="assets/app.css?v=<?= (int)@filemtime(ROOT . '/assets/app.css') ?>">
 <style>:root{--brand:<?= brand_color() ?>}</style>
 </head><body class="admin">
 <div class="shell">
@@ -433,5 +433,5 @@ function layout_start(string $title, string $active): void
 }
 function layout_end(): void
 {
-    echo '</main></div><script>window.CSRF=' . json_encode(csrf()) . '</script><script src="assets/app.js"></script></body></html>';
+    echo '</main></div><script>window.CSRF=' . json_encode(csrf()) . '</script><script src="assets/app.js?v=' . (int)@filemtime(ROOT . '/assets/app.js') . '"></script></body></html>';
 }

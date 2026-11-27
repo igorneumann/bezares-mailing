@@ -50,24 +50,42 @@ if ($a === 'rebase' && $isPost) {
     flash($ok ? "Dirección actualizada en $ok imagen(es) ($mails cambio(s) en correos): ahora se cargan desde " . base_url() . '.' : 'No había nada que actualizar.');
     redirect('index.php?p=media');
 }
+/* Marcar o desmarcar una imagen como cabecera de las newsletters */
+if ($a === 'header' && $isPost) {
+    $name = basename((string)($_POST['name'] ?? ''));
+    $on = !empty($_POST['on']);
+    if (!in_array($name, array_column(media_list('image'), 'name'), true)) flash('Esa imagen no está en la biblioteca.', 'err');
+    elseif ($name === NEWSLETTER_HEADER) flash('Es la cabecera por defecto: siempre aparece en el generador.', 'err');
+    else {
+        header_set($name, $on);
+        flash($on ? "«{$name}» aparecerá como cabecera en el generador de newsletter." : "«{$name}» ya no aparecerá como cabecera.");
+    }
+    redirect('index.php?p=media' . (($_POST['f'] ?? '') === 'headers' ? '&f=headers' : ''));
+}
 if ($a === 'delete' && $isPost) {
     $name = basename((string)($_POST['name'] ?? ''));
     $path = media_dir() . '/' . $name;
     if ($name === setting('logo')) flash('Esa imagen es el logo actual: cámbielo antes en Ajustes.', 'err');
     elseif (media_usage($name) && empty($_POST['force'])) flash('El archivo se usa en algún correo. Quítelo de esos correos antes de eliminarlo.', 'err');
-    elseif (preg_match('/\.(png|jpe?g|gif|webp|pdf|docx?|xlsx?)$/i', $name) && is_file($path) && @unlink($path)) flash('Archivo eliminado.');
+    elseif (preg_match('/\.(png|jpe?g|gif|webp|pdf|docx?|xlsx?)$/i', $name) && is_file($path) && @unlink($path)) {
+        if (in_array($name, header_names(), true)) header_set($name, false);
+        flash('Archivo eliminado.');
+    }
     else flash('No se pudo eliminar el archivo.', 'err');
     redirect('index.php?p=media');
 }
 
-$items = media_list();
+$all = media_list();
+$onlyHeaders = ($_GET['f'] ?? '') === 'headers';
+$nHeaders = count(array_filter($all, fn($m) => $m['kind'] === 'image' && is_header_image($m['name'])));
+$items = $onlyHeaders ? array_values(array_filter($all, fn($m) => $m['kind'] === 'image' && is_header_image($m['name']))) : $all;
 $external = media_external_urls();
 // Separar las que ya están en la biblioteca (solo hay que cambiar la dirección) de las de otras webs
 $relocate = [];
 foreach ($external as $u => $names) if (media_relocatable($u) !== '') { $relocate[$u] = $names; unset($external[$u]); }
 $writable = is_writable(media_dir());
 layout_start('Biblioteca', 'media'); ?>
-<div class="head"><h1>Biblioteca <small><?= count($items) ?> archivo(s): imágenes y documentos para adjuntar</small></h1></div>
+<div class="head"><h1>Biblioteca <small><?= count($all) ?> archivo(s): imágenes y documentos para adjuntar</small></h1></div>
 <?php if (!$writable): ?><div class="flash err">La carpeta <code>uploads</code> no tiene permisos de escritura.</div><?php endif ?>
 
 <?php if ($relocate): $oldHosts = array_unique(array_map(fn($u) => (string)parse_url($u, PHP_URL_HOST), array_keys($relocate))); ?>
@@ -112,17 +130,25 @@ layout_start('Biblioteca', 'media'); ?>
   </form>
 </div>
 
+<div class="mediabar">
+  <div class="seg"><a class="<?= $onlyHeaders ? '' : 'on' ?>" href="index.php?p=media">Todos <i><?= count($all) ?></i></a><a class="<?= $onlyHeaders ? 'on' : '' ?>" href="index.php?p=media&f=headers">Cabeceras <i><?= $nHeaders ?></i></a></div>
+  <span class="muted">Las imágenes marcadas como <b>cabecera</b> son las que se ofrecen en el generador de newsletter.</span>
+</div>
 <div class="mediagrid">
-<?php foreach ($items as $m): $used = media_usage($m['name']); $isLogo = $m['name'] === setting('logo'); ?>
-  <div class="card mediaitem">
+<?php foreach ($items as $m): $used = media_usage($m['name']); $isLogo = $m['name'] === setting('logo'); $isHeader = $m['kind'] === 'image' && is_header_image($m['name']); ?>
+  <div class="card mediaitem<?= $isHeader ? ' isheader' : '' ?>">
     <a class="thumb" href="<?= e($m['url']) ?>" target="_blank"><?php if ($m['kind'] === 'image'): ?><img src="<?= e($m['url']) ?>" alt="" loading="lazy"><?php else: ?><span class="docicon <?= e($m['ext']) ?>"><?= e(strtoupper($m['ext'])) ?></span><?php endif ?></a>
     <div class="meta">
       <b title="<?= e($m['name']) ?>"><?= e($m['name']) ?></b>
+      <?php if ($isHeader): ?><span><span class="pill header"><?= $m['name'] === NEWSLETTER_HEADER ? 'Cabecera por defecto' : 'Cabecera' ?></span></span><?php endif ?>
       <span class="muted"><?= $m['kind'] === 'image' ? $m['w'] . '×' . $m['h'] : 'Documento ' . e($m['label']) ?> · <?= media_size($m['size']) ?></span>
       <span class="muted"><?= $isLogo ? 'Logo actual' : ($used ? 'En uso: ' . e(implode(', ', $used)) : 'Sin usar') ?></span>
     </div>
     <div class="actions">
       <button type="button" class="btn small" data-copy="<?= e($m['url']) ?>">Copiar dirección</button>
+      <?php if ($m['kind'] === 'image' && !$isLogo && $m['name'] !== NEWSLETTER_HEADER): ?>
+      <form method="post" action="index.php?p=media&a=header" class="inline"><?= csrf_field() ?><input type="hidden" name="name" value="<?= e($m['name']) ?>"><input type="hidden" name="on" value="<?= $isHeader ? '' : '1' ?>"><input type="hidden" name="f" value="<?= $onlyHeaders ? 'headers' : '' ?>"><button class="btn small"><?= $isHeader ? 'Quitar de cabeceras' : 'Usar como cabecera' ?></button></form>
+      <?php endif ?>
       <?php if (!$isLogo && !$used): ?>
       <form method="post" action="index.php?p=media&a=delete" class="inline" onsubmit="return confirm('¿Eliminar este archivo?')"><?= csrf_field() ?><input type="hidden" name="name" value="<?= e($m['name']) ?>"><button class="btn small danger">Eliminar</button></form>
       <?php endif ?>
@@ -130,5 +156,6 @@ layout_start('Biblioteca', 'media'); ?>
   </div>
 <?php endforeach ?>
 </div>
-<?php if (!$items): ?><div class="card"><p class="empty">La biblioteca está vacía. Suba imágenes para usarlas en los correos, o documentos para adjuntarlos.</p></div><?php endif ?>
+<?php if (!$items && $onlyHeaders): ?><div class="card"><p class="empty">Todavía no hay imágenes marcadas como cabecera. En «Todos», pulse «Usar como cabecera» en las que quiera ofrecer en el generador de newsletter.</p></div>
+<?php elseif (!$items): ?><div class="card"><p class="empty">La biblioteca está vacía. Suba imágenes para usarlas en los correos, o documentos para adjuntarlos.</p></div><?php endif ?>
 <?php layout_end();

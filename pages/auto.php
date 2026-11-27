@@ -109,7 +109,8 @@ $upcoming = nps_upcoming(4);
 $current = '';
 foreach ([(int)date('Y') - 1, (int)date('Y')] as $y) foreach (nps_schedule($y) as $s) if ($s['at'] <= time()) $current = $s['label'];
 if ($current === '' && $upcoming) $current = $upcoming[0]['label'];
-$headers = array_values(array_filter(media_list('image'), fn($m) => $m['name'] !== setting('logo')));
+// Solo las imágenes marcadas como cabecera en la Biblioteca (la de por defecto va aparte, como primera opción)
+$headers = array_values(array_filter(header_images(), fn($m) => $m['name'] !== NEWSLETTER_HEADER));
 $lastHeader = (string)val("SELECT header_image FROM emails WHERE theme = 'newsletter' AND header_image <> '' ORDER BY id DESC LIMIT 1");
 $step = function (int $done, ?string $at, string $label) {
     if ($done === 1) return '<span class="step done">✓ ' . $label . '</span>';
@@ -204,9 +205,10 @@ layout_start('Automatización', 'auto'); ?>
       <label>Imagen de cabecera
         <select name="header_image">
           <option value="default" selected><?= NEWSLETTER_HEADER ?> (por defecto)<?= newsletter_default_header() === '' ? ' — aún no está en la biblioteca' : '' ?></option>
-          <?php foreach ($headers as $m): if ($m['name'] === NEWSLETTER_HEADER) continue; ?><option value="<?= e($m['url']) ?>"><?= e($m['name']) ?></option><?php endforeach ?>
+          <?php foreach ($headers as $m): ?><option value="<?= e($m['url']) ?>"><?= e($m['name']) ?></option><?php endforeach ?>
           <option value="">Solo el logo</option>
-        </select></label>
+        </select>
+        <small class="muted">Aparecen las imágenes marcadas como cabecera en la <a href="index.php?p=media&f=headers">Biblioteca</a>.</small></label>
     </div>
     <label>Idioma de los textos fijos del correo («ver en el navegador», página de baja)<select name="lang"><option value="en">English</option><option value="es" <?= setting('wp_lang', 'en') === 'es' ? 'selected' : '' ?>>Español</option></select></label>
     <label class="check"><input type="checkbox" name="copy_images" checked> Copiar las imágenes de las noticias a la biblioteca</label>
