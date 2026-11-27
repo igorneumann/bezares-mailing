@@ -54,8 +54,10 @@ también «darme de baja de todas las comunicaciones». La baja en un clic de Gm
   (por defecto 7 días después del recordatorio). Fechas, hora, plazos, listado, plantilla y administradores son configurables,
   y las fechas de cada campaña en curso se pueden cambiar.
 - **Generador de newsletter**: a partir de la dirección de un WordPress y un número de entradas crea una newsletter con
-  las 2 primeras en grande (imagen, titular con enlace y los dos primeros párrafos) y las siguientes en pequeño, de dos en dos
-  lado a lado, como el correo de ejemplo (API REST de WordPress o, si no, el canal RSS).
+  las primeras en grande (imagen, titular con enlace y los dos primeros párrafos) y las siguientes en pequeño, lado a lado en
+  2 o 3 columnas sin dejar filas a medias (API REST de WordPress o, si no, el canal RSS). Reparto según el número de entradas:
+  4 → 2 grandes + 2 en 2 columnas · 5 → 2 + 3 en 3 columnas · 6 → 2 + 4 en 2 columnas · 7 → 3 + 4 en 2 columnas ·
+  8 → 2 + 6 en 3 columnas · 9 → 3 + 6 en 3 columnas · 10 → 2 + 8 en 2 columnas. En el móvil las columnas se apilan.
 
 ### Aviso por correo de las respuestas
 Cada encuesta puede avisar por correo de sus respuestas: de todas, o solo de las que tengan una nota igual o menor que un

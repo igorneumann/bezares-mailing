@@ -493,21 +493,31 @@ function wp_fetch_posts(string $url, int $n): array
 }
 
 /** Crea el correo de newsletter a partir de las últimas entradas. Devuelve [id del correo, nº de entradas, avisos]. */
-function newsletter_generate(array $o): array
+/**
+ * Reparto de la newsletter según el número de entradas: [entradas grandes, columnas de las pequeñas].
+ * Se ponen 2 grandes (3 si con 2 no se pueden completar las filas de pequeñas) y las pequeñas en 3 columnas si
+ * llenan filas de tres; si no, en 2. Así nunca queda una fila a medias:
+ *   1-2 → todas grandes · 3 → 3 grandes · 4 → 2 + 2 en 2 col. · 5 → 2 + 3 en 3 col. · 6 → 2 + 4 en 2 col.
+ *   7 → 3 + 4 en 2 col. · 8 → 2 + 6 en 3 col. · 9 → 3 + 6 en 3 col. · 10 → 2 + 8 en 2 col.
+ */
+function newsletter_layout(int $n): array
 {
-    $posts = wp_fetch_posts($o['url'], (int)$o['count']);
-    if (!$posts) throw new RuntimeException('El sitio no tiene entradas publicadas.');
+    if ($n <= 2) return [max(0, $n), 2];
+    foreach ([2, 3] as $big) {
+        $rest = $n - $big;
+        if ($rest === 0) return [$big, 2];
+        if ($rest >= 3 && $rest % 3 === 0) return [$big, 3];
+        if ($rest >= 2 && $rest % 2 === 0) return [$big, 2];
+    }
+    return [$n, 2]; // no se llega aquí: con 2 o 3 grandes siempre cuadra una de las dos
+}
+
+/** HTML del cuerpo de la newsletter a partir de las entradas ($o: 'style' moderno|clasico y 'button'). */
+function newsletter_body(array $posts, array $o): string
+{
     $color = brand_color();
     $f = 'Ubuntu, Helvetica, Arial, sans-serif';
-    $btn = $o['button'] !== '' ? $o['button'] : 'More info >';
-    $warn = [];
-    foreach ($posts as &$p) {
-        if ($p['image'] !== '' && !empty($o['copy_images'])) {
-            try { $p['image'] = media_url(media_fetch_url($p['image'])); }
-            catch (Throwable $e) { $warn[] = 'No se pudo copiar la imagen de «' . $p['title'] . '» (se enlaza la original).'; }
-        }
-    }
-    unset($p);
+    $btn = ($o['button'] ?? '') !== '' ? $o['button'] : 'More info >';
     $divider = '<div style="border-top:3px solid ' . $color . ';font-size:1px;line-height:1px;margin:4px 0 22px;">&nbsp;</div>';
     // Entrada grande: imagen a todo el ancho, titular, los dos primeros párrafos y botón
     $big = function (array $p) use ($color, $f, $btn) {
@@ -519,11 +529,13 @@ function newsletter_generate(array $o): array
         foreach ($p['paragraphs'] as $t) $h .= '<p style="margin:0 0 14px;font-family:' . $f . ';">' . e($t) . '</p>';
         return $h . block_button($btn, $p['link'], $color) . '</div>';
     };
-    // Entrada pequeña (media columna): imagen, titular y un resumen corto del primer párrafo
-    $small = function (array $p) use ($color, $f, $btn) {
+    // Entrada pequeña (columna de 2 o 3): imagen, titular y un resumen corto del primer párrafo
+    $small = function (array $p, int $cols = 2) use ($color, $f, $btn) {
+        $len = $cols >= 3 ? 100 : 150;
         $text = (string)($p['paragraphs'][0] ?? '');
-        if (mb_strlen($text) > 150) $text = rtrim(preg_replace('/\s+\S*$/u', '', mb_substr($text, 0, 150)), ' ,;:.') . '…';
-        $h = '<td class="col2" width="50%" valign="top" style="width:50%;padding:0 8px 16px;font-family:' . $f . ';font-size:13px;line-height:1.5;">';
+        if (mb_strlen($text) > $len) $text = rtrim(preg_replace('/\s+\S*$/u', '', mb_substr($text, 0, $len)), ' ,;:.') . '…';
+        [$w, $wCss] = $cols >= 3 ? ['33%', '33.33%'] : ['50%', '50%'];
+        $h = '<td class="col2" width="' . $w . '" valign="top" style="width:' . $wCss . ';padding:0 8px 16px;font-family:' . $f . ';font-size:13px;line-height:1.5;">';
         if ($p['image'] !== '') $h .= '<a href="' . e($p['link']) . '" target="_blank" style="text-decoration:none;"><img src="' . e($p['image']) . '" alt="' . e($p['title'])
             . '" style="display:block;width:100%;height:auto;border:0;"></a>';
         return $h . '<p style="margin:10px 0;"><a href="' . e($p['link']) . '" target="_blank" style="color:' . $color . ';"><strong>' . e($p['title']) . '</strong></a></p>'
@@ -545,29 +557,45 @@ function newsletter_generate(array $o): array
             foreach ($p['paragraphs'] as $t) $h .= mb_p(e($t), 15, M_TXT, 12);
             return $h . mb_link($more, $p['link']) . '</div>';
         };
-        $small = function (array $p) use ($more, $cut) {
+        $small = function (array $p, int $cols = 2) use ($more, $cut) {
+            // Ancho de la imagen: 528 px de contenido menos los huecos entre columnas (24 px con dos, 15 px con tres)
+            [$iw, $ts, $len] = $cols >= 3 ? [166, 15, 100] : [252, 17, 150];
             $h = '';
-            if ($p['image'] !== '') $h .= '<div class="full" style="margin:0 0 14px;"><a href="' . e($p['link']) . '" target="_blank"><img src="' . e($p['image']) . '" width="252" alt="' . e($p['title'])
-                . '" style="display:block;width:100%;max-width:252px;height:auto;border:0;border-radius:10px;"></a></div>';
+            if ($p['image'] !== '') $h .= '<div class="full" style="margin:0 0 14px;"><a href="' . e($p['link']) . '" target="_blank"><img src="' . e($p['image']) . '" width="' . $iw . '" alt="' . e($p['title'])
+                . '" style="display:block;width:100%;max-width:' . $iw . 'px;height:auto;border:0;border-radius:10px;"></a></div>';
             if (($p['category'] ?? '') !== '') $h .= mb_eyebrow($p['category'], M_SKY);
-            return $h . mb_h2($p['title'], $p['link'], 17, 8) . mb_p(e($cut($p, 150)), 14, M_TXT, 10) . mb_link($more, $p['link'], 14);
+            return $h . mb_h2($p['title'], $p['link'], $ts, 8) . mb_p(e($cut($p, $len)), 14, M_TXT, 10) . mb_link($more, $p['link'], 14);
         };
         $divider = '<div style="border-top:1px solid ' . M_LINE . ';font-size:1px;line-height:1px;margin:0 0 28px;">&nbsp;</div>';
     }
-    // Como el correo de ejemplo: las 2 primeras entradas grandes y el resto de dos en dos, lado a lado.
-    // Si queda una suelta al final, va en grande.
+    // Primeras entradas en grande y el resto en filas completas de 2 o 3 columnas (ver newsletter_layout)
+    [$nBig, $cols] = newsletter_layout(count($posts));
     $body = '';
-    $rest = array_slice($posts, 2);
-    foreach (array_slice($posts, 0, 2) as $p) $body .= $big($p);
+    $rest = array_slice($posts, $nBig);
+    foreach (array_slice($posts, 0, $nBig) as $p) $body .= $big($p);
     if ($rest) $body .= $divider;
-    for ($i = 0; $i < count($rest); $i += 2) {
-        if (isset($rest[$i + 1]) && $modern) {
-            $body .= mb_two($small($rest[$i]), $small($rest[$i + 1]));
-        } elseif (isset($rest[$i + 1])) {
-            $body .= '<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout:fixed;"><tr>'
-                . $small($rest[$i]) . $small($rest[$i + 1]) . '</tr></table>';
-        } else $body .= $big($rest[$i]);
+    foreach (array_chunk($rest, $cols) as $row) {
+        $cells = array_map(fn($p) => $small($p, $cols), $row);
+        $body .= $modern ? mb_cols($cells)
+            : '<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout:fixed;"><tr>' . implode('', $cells) . '</tr></table>';
     }
+    return $body;
+}
+
+function newsletter_generate(array $o): array
+{
+    $posts = wp_fetch_posts($o['url'], (int)$o['count']);
+    if (!$posts) throw new RuntimeException('El sitio no tiene entradas publicadas.');
+    $warn = [];
+    foreach ($posts as &$p) {
+        if ($p['image'] !== '' && !empty($o['copy_images'])) {
+            try { $p['image'] = media_url(media_fetch_url($p['image'])); }
+            catch (Throwable $e) { $warn[] = 'No se pudo copiar la imagen de «' . $p['title'] . '» (se enlaza la original).'; }
+        }
+    }
+    unset($p);
+    $modern = ($o['style'] ?? 'moderno') === 'moderno';
+    $body = newsletter_body($posts, $o);
     // Cabecera: por defecto bezares-newsletter-2026-2.png. Si todavía está solo en el servidor antiguo, se copia a la biblioteca.
     $header = trim((string)$o['header_image']);
     if ($header === 'default' || $header === NEWSLETTER_HEADER_OLD) {

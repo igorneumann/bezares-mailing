@@ -145,8 +145,27 @@ function mb_article(string $img, string $tag, string $title, string $text, strin
 /** Dos columnas (en el móvil, una debajo de otra). */
 function mb_two(string $a, string $b): string
 {
-    $td = fn($x, $pad) => '<td class="col2 mstack" width="50%" valign="top" style="width:50%;padding:' . $pad . ';">' . $x . '</td>';
-    return '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="margin:0 0 26px;"><tr>' . $td($a, '0 12px 18px 0') . $td($b, '0 0 18px 12px') . '</tr></table>';
+    return mb_cols([$a, $b]);
+}
+/**
+ * Fila de 2 o 3 columnas del mismo ancho (en el móvil, una debajo de otra). El hueco entre columnas es de 24 px con dos
+ * y de 15 px con tres, repartido para que todas tengan el mismo ancho útil.
+ */
+function mb_cols(array $cells): string
+{
+    $n = max(1, count($cells));
+    $gap = $n >= 3 ? 15 : 24;
+    $w = $n === 3 ? '33%' : (int)floor(100 / $n) . '%';
+    $wCss = $n === 3 ? '33.33%' : $w;
+    $out = '';
+    foreach (array_values($cells) as $i => $x) {
+        // Cada columna cede el mismo relleno en total: la primera solo a la derecha, la última solo a la izquierda
+        $left = (int)round($gap * $i / $n);
+        $right = (int)round($gap * ($n - 1 - $i) / $n);
+        $px = fn(int $v) => $v ? $v . 'px' : '0';
+        $out .= '<td class="col2 mstack" width="' . $w . '" valign="top" style="width:' . $wCss . ';padding:0 ' . $px($right) . ' 18px ' . $px($left) . ';">' . $x . '</td>';
+    }
+    return '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="margin:0 0 26px;"><tr>' . $out . '</tr></table>';
 }
 function mb_article_small(string $img, string $tag, string $title, string $text, string $href, string $more = 'Leer más'): string
 {
