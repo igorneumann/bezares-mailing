@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 define('ROOT', dirname(__DIR__));
+// Versión del programa: lib/VERSION (sube 0.1 en cada commit; ver el hook pre-commit).
+define('APP_VERSION', trim((string)@file_get_contents(__DIR__ . '/VERSION')) ?: '1.0');
 mb_internal_encoding('UTF-8');
 date_default_timezone_set('Europe/Madrid');
 error_reporting(E_ALL);
@@ -433,5 +435,5 @@ function layout_start(string $title, string $active): void
 }
 function layout_end(): void
 {
-    echo '</main></div><script>window.CSRF=' . json_encode(csrf()) . '</script><script src="assets/app.js?v=' . (int)@filemtime(ROOT . '/assets/app.js') . '"></script></body></html>';
+    echo '</main></div><div class="app-version" title="Versión del programa">v' . e(APP_VERSION) . '</div><script>window.CSRF=' . json_encode(csrf()) . '</script><script src="assets/app.js?v=' . (int)@filemtime(ROOT . '/assets/app.js') . '"></script></body></html>';
 }

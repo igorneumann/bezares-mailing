@@ -325,3 +325,6 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 .stattable td.num .delta{margin-top:3px}
 
 .mediabar .dedupe{margin-left:auto}
+
+/* Versión del programa, esquina inferior derecha */
+.app-version{position:fixed;right:10px;bottom:6px;z-index:5;font-size:.72rem;color:var(--muted);pointer-events:none;user-select:none}
