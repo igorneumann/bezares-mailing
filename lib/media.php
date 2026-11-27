@@ -219,20 +219,122 @@ function http_download(string $url, int $timeout = 20): string
     throw new RuntimeException('Demasiadas redirecciones.');
 }
 
-/** Descarga una imagen de otra web y la guarda en la biblioteca. Devuelve el nombre del archivo. */
+/* Direcciones ya copiadas a la biblioteca (url => archivo), para no descargar otra vez la misma imagen. */
+function media_sources(): array
+{
+    $m = json_decode(setting('media_sources'), true);
+    return is_array($m) ? $m : [];
+}
+function media_source_set(string $url, string $name): void
+{
+    $m = media_sources();
+    unset($m[$url]);
+    $m[$url] = $name;
+    if (count($m) > 2000) $m = array_slice($m, -2000, null, true); // las más recientes
+    set_setting('media_sources', json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
+/** Archivo de la biblioteca con exactamente el mismo contenido que $path ('' si no hay ninguno). */
+function media_find_same(string $path, string $except = ''): string
+{
+    $size = filesize($path);
+    $hash = null;
+    foreach (glob(media_dir() . '/*.{png,jpg,jpeg,gif,webp,pdf,doc,docx,xls,xlsx}', GLOB_BRACE) ?: [] as $f) {
+        if (basename($f) === $except || filesize($f) !== $size) continue; // primero por tamaño: no hace falta leer todos
+        $hash ??= sha1_file($path);
+        if (sha1_file($f) === $hash) return basename($f);
+    }
+    return '';
+}
+
+/**
+ * Copia a la biblioteca una imagen de otra web y devuelve el nombre del archivo. Si esa dirección ya se copió, o la
+ * biblioteca ya tiene una imagen idéntica (mismo contenido), devuelve la existente en vez de crear un duplicado.
+ */
 function media_fetch_url(string $url): string
 {
+    $known = media_sources()[$url] ?? '';
+    if ($known !== '' && is_file(media_dir() . '/' . basename($known))) return basename($known);
     $data = http_download($url);
     $tmp = tempnam(sys_get_temp_dir(), 'img');
     file_put_contents($tmp, $data);
     try {
         $ext = media_check($tmp);
-        $name = media_name(rawurldecode(basename((string)parse_url($url, PHP_URL_PATH))), $ext);
-        if (!@copy($tmp, media_dir() . '/' . $name)) throw new RuntimeException('No se pudo guardar (permisos de la carpeta uploads).');
+        $name = media_find_same($tmp);
+        if ($name === '') {
+            $name = media_name(rawurldecode(basename((string)parse_url($url, PHP_URL_PATH))), $ext);
+            if (!@copy($tmp, media_dir() . '/' . $name)) throw new RuntimeException('No se pudo guardar (permisos de la carpeta uploads).');
+        }
+        media_source_set($url, $name);
         return $name;
     } finally {
         @unlink($tmp);
     }
+}
+
+/** Nombres de archivo usados en algún correo (imagen de cabecera, cuerpo o adjunto), sin consultar uno a uno. */
+function media_used_names(): array
+{
+    $used = [];
+    $hay = '';
+    foreach (all('SELECT header_image, body FROM emails') as $e) $hay .= "\n" . $e['header_image'] . "\n" . $e['body'];
+    foreach (media_list() as $m) {
+        $n = $m['name'];
+        if (str_contains($hay, '/uploads/' . rawurlencode($n)) || str_contains($hay, '/uploads/' . $n)) $used[$n] = true;
+    }
+    try {
+        foreach (all("SELECT attachments FROM emails WHERE attachments IS NOT NULL AND attachments <> ''") as $e)
+            foreach (email_attachments($e) as $n) $used[$n] = true;
+    } catch (Throwable $e) {}
+    return $used;
+}
+
+/**
+ * Grupos de archivos idénticos (mismo contenido). En cada grupo se conserva uno: el que se usa en correos, el logo o
+ * las cabeceras marcadas no se tocan nunca; si ninguno se usa, se queda el más antiguo. Devuelve [[conservar...], [borrar...]] por grupo.
+ */
+function media_duplicates(): array
+{
+    $bySize = [];
+    foreach (media_list() as $m) $bySize[$m['size']][] = $m;
+    $used = null;
+    $groups = [];
+    foreach ($bySize as $files) {
+        if (count($files) < 2) continue;
+        $byHash = [];
+        foreach ($files as $m) $byHash[sha1_file(media_dir() . '/' . $m['name'])][] = $m;
+        foreach ($byHash as $same) {
+            if (count($same) < 2) continue;
+            $used ??= media_used_names();
+            $protect = fn($m) => isset($used[$m['name']]) || $m['name'] === setting('logo') || is_header_image($m['name']);
+            usort($same, fn($a, $b) => $a['time'] <=> $b['time'] ?: strlen($a['name']) <=> strlen($b['name']));
+            $keep = array_values(array_filter($same, $protect));
+            if (!$keep) $keep = [$same[0]];
+            $drop = array_values(array_filter($same, fn($m) => !in_array($m, $keep, true)));
+            if ($drop) $groups[] = ['keep' => array_column($keep, 'name'), 'drop' => array_column($drop, 'name')];
+        }
+    }
+    return $groups;
+}
+
+/** Borra los duplicados que no se usan en ningún correo. Devuelve [archivos borrados, bytes liberados]. */
+function media_remove_duplicates(): array
+{
+    $n = 0; $bytes = 0;
+    $map = media_sources();
+    foreach (media_duplicates() as $g) {
+        foreach ($g['drop'] as $name) {
+            $path = media_dir() . '/' . basename($name);
+            $size = (int)@filesize($path);
+            if (is_file($path) && @unlink($path)) {
+                $n++; $bytes += $size;
+                // Las direcciones que apuntaban al borrado pasan a apuntar al que se conserva
+                foreach ($map as $u => $f) if ($f === $name) $map[$u] = $g['keep'][0];
+            }
+        }
+    }
+    if ($n) set_setting('media_sources', json_encode($map, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    return [$n, $bytes];
 }
 
 /** Imágenes de otros servidores usadas en los correos: [url => [nombres de correos]]. */

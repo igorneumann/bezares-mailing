@@ -323,3 +323,5 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 .cmpline{margin-top:.45rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}.cmpline small{color:var(--muted);font-size:.76rem}
 .cmptable{margin-top:1.1rem}.cmptable tr.ratio td{background:#fafbfd}.cmptable tr.ratio td:first-child{padding-left:1.6rem;color:var(--muted)}
 .stattable td.num .delta{margin-top:3px}
+
+.mediabar .dedupe{margin-left:auto}

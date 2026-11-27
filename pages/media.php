@@ -62,6 +62,11 @@ if ($a === 'header' && $isPost) {
     }
     redirect('index.php?p=media' . (($_POST['f'] ?? '') === 'headers' ? '&f=headers' : ''));
 }
+if ($a === 'dedupe' && $isPost) {
+    [$n, $bytes] = media_remove_duplicates();
+    flash($n ? "Se eliminaron $n duplicado(s) que no se usaban en ningún correo (" . media_size($bytes) . ' liberados).' : 'No hay duplicados sin usar.');
+    redirect('index.php?p=media');
+}
 if ($a === 'delete' && $isPost) {
     $name = basename((string)($_POST['name'] ?? ''));
     $path = media_dir() . '/' . $name;
@@ -84,6 +89,8 @@ $external = media_external_urls();
 $relocate = [];
 foreach ($external as $u => $names) if (media_relocatable($u) !== '') { $relocate[$u] = $names; unset($external[$u]); }
 $writable = is_writable(media_dir());
+$dups = media_duplicates();
+$nDrop = array_sum(array_map(fn($g) => count($g['drop']), $dups));
 layout_start('Biblioteca', 'media'); ?>
 <div class="head"><h1>Biblioteca <small><?= count($all) ?> archivo(s): imágenes y documentos para adjuntar</small></h1></div>
 <?php if (!$writable): ?><div class="flash err">La carpeta <code>uploads</code> no tiene permisos de escritura.</div><?php endif ?>
@@ -133,6 +140,8 @@ layout_start('Biblioteca', 'media'); ?>
 <div class="mediabar">
   <div class="seg"><a class="<?= $onlyHeaders ? '' : 'on' ?>" href="index.php?p=media">Todos <i><?= count($all) ?></i></a><a class="<?= $onlyHeaders ? 'on' : '' ?>" href="index.php?p=media&f=headers">Cabeceras <i><?= $nHeaders ?></i></a></div>
   <span class="muted">Las imágenes marcadas como <b>cabecera</b> son las que se ofrecen en el generador de newsletter.</span>
+  <form method="post" action="index.php?p=media&a=dedupe" class="inline dedupe" onsubmit="return confirm(<?= e(json_encode($nDrop ? "Se eliminarán $nDrop archivo(s) repetidos que no se usan en ningún correo. En cada grupo se conserva una copia. ¿Continuar?" : '')) ?>)">
+    <?= csrf_field() ?><button class="btn small" <?= $nDrop ? '' : 'disabled' ?> title="<?= $nDrop ? e(implode("\n", array_map(fn($g) => implode(', ', $g['drop']) . ' = ' . $g['keep'][0], $dups))) : 'No hay archivos repetidos sin usar' ?>">Eliminar duplicados sin usar<?= $nDrop ? " ($nDrop)" : '' ?></button></form>
 </div>
 <div class="mediagrid">
 <?php foreach ($items as $m): $used = media_usage($m['name']); $isLogo = $m['name'] === setting('logo'); $isHeader = $m['kind'] === 'image' && is_header_image($m['name']); ?>
