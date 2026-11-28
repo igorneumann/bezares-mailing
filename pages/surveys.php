@@ -410,8 +410,27 @@ if ($a === 'edit') {
 
 /* ---------- Listado ---------- */
 $rows = all('SELECT s.*, (SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id) n FROM surveys s ORDER BY s.id DESC');
+$vista = in_array($_GET['vista'] ?? '', ['cuadricula', 'lista'], true) ? $_GET['vista'] : (string)($_SESSION['surveys_view'] ?? 'cuadricula');
+$_SESSION['surveys_view'] = $vista;
 layout_start('Encuestas', 'surveys'); ?>
 <div class="head"><h1>Encuestas</h1><a class="btn primary" href="index.php?p=surveys&a=edit">+ Nueva encuesta</a></div>
+<div class="vbar"><span class="muted"><?= count($rows) ?> encuesta(s)</span><?= view_switch('index.php?p=surveys', $vista) ?></div>
+<?php if ($vista === 'cuadricula'): ?>
+  <?php if (!$rows): ?><div class="card"><p class="empty">Todavía no hay encuestas.</p></div><?php endif ?>
+  <div class="co-grid"><?php foreach ($rows as $r):
+      $nps = null;
+      foreach (survey_stats($r) as $qq) if ($qq['type'] === 'nps') { $nps = $qq['nps']; break; }
+      $nq = (int)val("SELECT COUNT(*) FROM questions WHERE survey_id = ? AND type <> 'section'", [$r['id']]);
+      $last = val('SELECT MAX(created_at) FROM responses WHERE survey_id = ?', [$r['id']]); ?>
+    <article class="co-tile ml-tile">
+      <div class="co-tile-top"><span class="ml-ic" aria-hidden="true">📊</span><div><h2 class="co-name"><a href="index.php?p=surveys&a=edit&id=<?= (int)$r['id'] ?>"><?= e($r['title']) ?></a></h2>
+        <span class="pill <?= $r['active'] ? 'subscribed' : 'unsubscribed' ?>"><?= $r['active'] ? 'Abierta' : 'Cerrada' ?></span></div></div>
+      <p class="co-tile-sub"><?= $nq ?> pregunta(s) · <?= $r['max_per_contact'] ? 'máx. ' . (int)$r['max_per_contact'] . ' por contacto' : 'sin límite por contacto' ?><br><?= $r['is_public'] ? 'Pública' : 'Solo con enlace personal del correo' ?></p>
+      <div class="co-tile-kpi"><div><small>Respuestas</small><b><?= (int)$r['n'] ?></b></div><div><small>Última</small><b><?= $last ? e(substr(fecha($last), 0, 10)) : '—' ?></b></div><div><small>NPS</small><b><?= $nps === null ? '—' : ($nps > 0 ? '+' : '') . $nps ?></b></div></div>
+      <div class="ml-acts"><a class="btn small primary" href="index.php?p=surveys&a=results&id=<?= (int)$r['id'] ?>">Resultados</a> <a class="btn small" href="index.php?p=surveys&a=edit&id=<?= (int)$r['id'] ?>">Editar</a><?php if ($r['is_public']): ?> <a class="btn small" href="s.php?s=<?= e($r['slug']) ?>" target="_blank" rel="noopener">Abrir ↗</a><?php endif ?></div>
+    </article>
+  <?php endforeach ?></div>
+<?php layout_end(); return; endif ?>
 <div class="card table"><table>
   <thead><tr><th>Título</th><th>Estado</th><th>Límite por contacto</th><th>Respuestas</th><th>NPS</th><th></th></tr></thead>
   <tbody>

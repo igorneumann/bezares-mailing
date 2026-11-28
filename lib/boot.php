@@ -211,6 +211,15 @@ function csrf(): string
     if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = token();
     return $_SESSION['csrf'];
 }
+/** Interruptor Cuadrícula / Lista de los listados. $base: dirección sin «vista». */
+function view_switch(string $base, string $cur): string
+{
+    $o = '<div class="vswitch" role="group" aria-label="Vista">';
+    foreach (['cuadricula' => '▦ Cuadrícula', 'lista' => '☰ Lista'] as $k => $l) {
+        $o .= '<a class="' . ($k === $cur ? 'on' : '') . '" href="' . e($base . (str_contains($base, '?') ? '&' : '?') . 'vista=' . $k) . '"' . ($k === $cur ? ' aria-current="true"' : '') . '>' . $l . '</a>';
+    }
+    return $o . '</div>';
+}
 function csrf_field(): string { return '<input type="hidden" name="_csrf" value="' . csrf() . '">'; }
 function csrf_check(): void
 {

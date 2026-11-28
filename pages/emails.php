@@ -420,6 +420,29 @@ $pct = fn($r) => $r['sent'] ? round($r['opened'] / $r['sent'] * 100) . '%' : '�
 $state = fn($r) => $r['pending'] ? '<span class="pill pending">En cola</span>'
     : ($r['sent'] ? '<span class="pill subscribed">Enviado</span>'
     : ($r['last_send'] ? '<span class="pill unsubscribed" title="Se intentó enviar y no salió ninguno">Fallido</span>' : '<span class="pill">Borrador</span>'));
+// Vista: fichas lado a lado (por defecto) o la lista de siempre; se recuerda la última elegida
+$vista = in_array($_GET['vista'] ?? '', ['cuadricula', 'lista'], true) ? $_GET['vista'] : (string)($_SESSION['emails_view'] ?? 'cuadricula');
+$_SESSION['emails_view'] = $vista;
+$actions = function (array $r): string {
+    $id = (int)$r['id'];
+    $csrf = csrf_field();
+    $ask = '¿Eliminar el correo «' . addslashes($r['name']) . '»?' . ($r['sent'] ? ' Se perderán también sus estadísticas de envío.' : '');
+    return ($r['sent'] || $r['pending'] ? '' : '<a class="btn small primary" href="index.php?p=emails&a=send&id=' . $id . '">Enviar</a> ')
+        . ($r['sent'] || $r['pending'] || $r['last_send'] ? '<a class="btn small" href="index.php?p=emails&a=stats&id=' . $id . '">Estadísticas</a> ' : '')
+        . '<form method="post" action="index.php?p=emails&a=copy&id=' . $id . '" class="inline">' . $csrf . '<button class="btn small">Duplicar</button></form> '
+        . '<form method="post" action="index.php?p=emails&a=delete&id=' . $id . '" class="inline" onsubmit="return confirm(\'' . e($ask) . '\')">' . $csrf . '<button class="btn small danger">Eliminar</button></form>';
+};
+/** Ficha de un correo (vista Cuadrícula). */
+$tile = function (array $r) use ($themes, $pct, $state, $sentAt, $actions): string {
+    $id = (int)$r['id'];
+    $when = $r['pending'] ? ['Empezó', fecha($r['last_send'])] : ($r['sent'] ? ['Último envío', fecha($sentAt($r))] : ['Modificado', fecha($r['updated_at'])]);
+    return '<article class="co-tile ml-tile"><div class="co-tile-top"><span class="ml-ic" aria-hidden="true">✉</span><div><h2 class="co-name"><a href="index.php?p=emails&a=edit&id=' . $id . '">' . e($r['name']) . '</a>'
+        . (($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '') . '</h2>' . $state($r) . '</div></div>'
+        . '<p class="co-tile-sub">' . ($r['subject'] !== '' ? e($r['subject']) : '<i>Sin asunto</i>') . '<br>' . e($themes[$r['theme']] ?? $r['theme']) . ($r['survey'] ? ' · ' . e($r['survey']) : '') . '</p>'
+        . '<div class="co-tile-kpi"><div><small>Enviados</small><b>' . (int)$r['sent'] . ($r['pending'] ? ' <span class="pill pending">+' . (int)$r['pending'] . '</span>' : '') . '</b></div>'
+        . '<div><small>Abiertos</small><b>' . ($r['sent'] ? (int)$r['opened'] . ' · ' . $pct($r) : '—') . '</b></div><div><small>' . $when[0] . '</small><b>' . e(substr($when[1], 0, 10)) . '</b></div></div>'
+        . '<div class="ml-acts">' . $actions($r) . '</div></article>';
+};
 $cells = function (array $r) use ($tab, $themes, $pct, $state, $sentAt): string {
     $c = match ($tab) {
         'pend' => [e($themes[$r['theme']] ?? $r['theme']), e($r['survey'] ?? '—'),
@@ -448,9 +471,28 @@ $empty = [
 ];
 layout_start('Correos', 'emails'); ?>
 <div class="head"><h1>Correos</h1><a class="btn primary" href="index.php?p=emails&a=edit">+ Nuevo correo</a></div>
-<div class="mediabar"><div class="seg">
+<div class="mediabar vbar"><div class="seg">
   <?php foreach ($labels as $k => $l): ?><a class="<?= $tab === $k ? 'on' : '' ?>" href="index.php?p=emails&t=<?= $k ?>"><?= $l ?> <i><?= count($tabs[$k]) ?></i></a><?php endforeach ?>
-</div></div>
+</div><?= view_switch('index.php?p=emails&t=' . $tab, $vista) ?></div>
+<?php if ($vista === 'cuadricula'):
+    if (!$tabs[$tab]): ?><div class="card"><p class="empty"><?= $empty[$tab] ?></p></div>
+<?php elseif ($tab === 'env'):
+      $groups = [];
+      foreach ($tabs['env'] as $r) $groups[substr($sentAt($r), 0, 7)][] = $r;
+      $first = true;
+      foreach ($groups as $ym => $list):
+          $sent = array_sum(array_column($list, 'sent'));
+          $opened = array_sum(array_column($list, 'opened'));
+          $label = preg_match('/^(\d{4})-(\d{2})$/', (string)$ym, $mm) ? $months[(int)$mm[2]] . ' ' . $mm[1] : 'Sin fecha'; ?>
+  <section class="mgroup mgrid<?= $first ? '' : ' closed' ?>"><div class="mhead"><button type="button" aria-expanded="<?= $first ? 'true' : 'false' ?>" onclick="var g=this.closest('.mgroup');g.classList.toggle('closed');this.setAttribute('aria-expanded',!g.classList.contains('closed'))"><span class="chev" aria-hidden="true"></span><b><?= e($label) ?></b>
+    <span class="muted"><?= count($list) ?> correo(s) · <?= $sent ?> enviados · <?= $sent ? round($opened / $sent * 100) : 0 ?>% abiertos</span></button></div>
+    <div class="co-grid"><?php foreach ($list as $r) echo $tile($r) ?></div></section>
+<?php $first = false; endforeach; else: ?>
+  <div class="co-grid"><?php foreach ($tabs[$tab] as $r) echo $tile($r) ?></div>
+<?php endif;
+    layout_end();
+    return;
+endif ?>
 <div class="card table"><table class="emaillist">
   <thead><tr><th>Nombre</th><th><?= implode('</th><th>', $heads[$tab]) ?></th><th></th></tr></thead>
   <?php if (!$tabs[$tab]): ?>
