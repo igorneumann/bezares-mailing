@@ -106,6 +106,21 @@ for ($t = strtotime($monthly ? substr($from, 0, 7) . '-01' : $from); $t <= strto
     $buckets[$k] = $series[$k] ?? $zero;
 }
 $chartMax = max(1, ...array_column($buckets, 'sent'));
+// Comparación en el gráfico: los enviados del otro periodo, tramo a tramo (el primer día con el primer día…)
+$cSent = [];
+if ($cmp) {
+    $cs = [];
+    foreach (all("SELECT SUBSTR($D, 1, $len) AS g, $AGG $FROM GROUP BY SUBSTR($D, 1, $len)", $CP) as $r) $cs[(string)$r['g']] = $norm($r);
+    for ($t = strtotime($monthly ? substr($cfrom, 0, 7) . '-01' : $cfrom); $t <= strtotime($cto) && count($cSent) < count($buckets); $t = strtotime($monthly ? '+1 month' : '+1 day', $t)) {
+        $cSent[] = ($cs[date($monthly ? 'Y-m' : 'Y-m-d', $t)] ?? $zero)['sent'];
+    }
+    $cSent = array_pad($cSent, count($buckets), 0);
+}
+/* Gráfico que dibuja assets/charts.js: line, bar, stack o spark. */
+$chart = function (string $type, array $labels, array $series, string $label, array $opt = []): string {
+    $d = ['type' => $type, 'labels' => array_values($labels), 'series' => array_values($series), 'label' => $label] + array_intersect_key($opt, ['fmt' => 1, 'ratio' => 1]);
+    return '<div class="chx-box' . ($type === 'spark' ? ' chx-spark' : '') . '" data-chart="' . e(json_encode($d, JSON_UNESCAPED_UNICODE)) . '"' . (isset($opt['h']) ? ' data-h="' . (int)$opt['h'] . '"' : '') . '></div>';
+};
 
 // Enlaces más pulsados en el periodo (las direcciones de encuesta llevan datos personales: se agrupan por encuesta)
 $linkLabel = function (string $u): string {
@@ -169,11 +184,13 @@ $delta = function (float $now, float $before, bool $upGood = true, bool $points 
     $arrow = $cls === 'eq' ? '' : ($d > 0 ? '▲ ' : '▼ ');
     return '<span class="delta ' . $cls . '">' . $arrow . $txt . '</span>';
 };
-$kpi = function (string $label, int $value, string $sub = '', ?float $ratio = null, string $cls = '', string $dl = '', ?int $before = null) {
+$kpi = function (string $label, int $value, string $sub = '', ?float $ratio = null, string $cls = '', string $dl = '', ?int $before = null, string $spark = '') use ($buckets, $chart) {
+    $sp = $spark !== '' ? array_column($buckets, $spark) : [];
     ?><div class="card kpi stat <?= $cls ?>"><span><?= e($label) ?></span><b><?= number_format($value, 0, ',', '.') ?></b>
       <?php if ($sub !== ''): ?><em><?= $sub ?></em><?php endif ?>
       <?php if ($dl !== ''): ?><div class="cmpline"><?= $dl ?> <small>antes <?= number_format((int)$before, 0, ',', '.') ?></small></div><?php endif ?>
-      <?php if ($ratio !== null): ?><div class="bar"><div class="fill" style="width:<?= min(100, max(0, $ratio * 100)) ?>%"></div></div><?php endif ?></div><?php
+      <?php if ($ratio !== null): ?><div class="bar"><div class="fill" style="width:<?= min(100, max(0, $ratio * 100)) ?>%"></div></div><?php endif ?>
+      <?php if (count($sp) > 1 && array_sum($sp)): ?><?= $chart('spark', array_fill(0, count($sp), ''), [['name' => $label, 'data' => $sp]], 'Evolución de ' . mb_strtolower($label), ['h' => 30]) ?><?php endif ?></div><?php
 };
 $rate = fn($x, $of) => $of ? $x / $of : 0.0;
 
@@ -206,14 +223,14 @@ layout_start('Estadísticas', 'stats'); ?>
 
 <div class="kpis statkpis">
   <?php $c = $ctot; $rd = fn($k, $of = 'sent', $good = true) => $delta($rate($tot[$k], $tot[$of]), $rate($c[$k], $c[$of]), $good, true); ?>
-  <?php $kpi('Enviados', $tot['sent'], number_format($tot['people'], 0, ',', '.') . ' contacto(s) distintos' . ($pending ? ' · ' . $pending . ' en cola ahora' : ''), null, '', $delta($tot['sent'], $c['sent']), $c['sent']) ?>
-  <?php $kpi('Fallidos', $tot['failed'], $pct($tot['failed'], $tot['tried']) . ' de los intentos', $rate($tot['failed'], $tot['tried']), 'bad', $delta($tot['failed'], $c['failed'], false) . ' ' . $rd('failed', 'tried', false), $c['failed']) ?>
-  <?php $kpi('Abiertos', $tot['opened'], $pct($tot['opened'], $tot['sent']) . ' de apertura', $rate($tot['opened'], $tot['sent']), 'ok', $delta($tot['opened'], $c['opened']) . ' ' . $rd('opened'), $c['opened']) ?>
-  <?php $kpi('Hicieron clic', $tot['clicked'], $pct($tot['clicked'], $tot['sent']) . ' de clic · ' . number_format($tot['clicks'], 0, ',', '.') . ' clics', $rate($tot['clicked'], $tot['sent']), '', $delta($tot['clicked'], $c['clicked']) . ' ' . $rd('clicked'), $c['clicked']) ?>
-  <?php $kpi('Respondieron la encuesta', $tot['responded'], $pct($tot['responded'], $tot['sent']) . ' de los enviados', $rate($tot['responded'], $tot['sent']), '', $delta($tot['responded'], $c['responded']) . ' ' . $rd('responded'), $c['responded']) ?>
-  <?php $kpi('Conversiones', $tot['converted'], $pct($tot['converted'], $tot['sent']) . ' · clic o respuesta', $rate($tot['converted'], $tot['sent']), 'conv', $delta($tot['converted'], $c['converted']) . ' ' . $rd('converted'), $c['converted']) ?>
+  <?php $kpi('Enviados', $tot['sent'], number_format($tot['people'], 0, ',', '.') . ' contacto(s) distintos' . ($pending ? ' · ' . $pending . ' en cola ahora' : ''), null, '', $delta($tot['sent'], $c['sent']), $c['sent'], 'sent') ?>
+  <?php $kpi('Fallidos', $tot['failed'], $pct($tot['failed'], $tot['tried']) . ' de los intentos', $rate($tot['failed'], $tot['tried']), 'bad', $delta($tot['failed'], $c['failed'], false) . ' ' . $rd('failed', 'tried', false), $c['failed'], 'failed') ?>
+  <?php $kpi('Abiertos', $tot['opened'], $pct($tot['opened'], $tot['sent']) . ' de apertura', $rate($tot['opened'], $tot['sent']), 'ok', $delta($tot['opened'], $c['opened']) . ' ' . $rd('opened'), $c['opened'], 'opened') ?>
+  <?php $kpi('Hicieron clic', $tot['clicked'], $pct($tot['clicked'], $tot['sent']) . ' de clic · ' . number_format($tot['clicks'], 0, ',', '.') . ' clics', $rate($tot['clicked'], $tot['sent']), '', $delta($tot['clicked'], $c['clicked']) . ' ' . $rd('clicked'), $c['clicked'], 'clicked') ?>
+  <?php $kpi('Respondieron la encuesta', $tot['responded'], $pct($tot['responded'], $tot['sent']) . ' de los enviados', $rate($tot['responded'], $tot['sent']), '', $delta($tot['responded'], $c['responded']) . ' ' . $rd('responded'), $c['responded'], 'responded') ?>
+  <?php $kpi('Conversiones', $tot['converted'], $pct($tot['converted'], $tot['sent']) . ' · clic o respuesta', $rate($tot['converted'], $tot['sent']), 'conv', $delta($tot['converted'], $c['converted']) . ' ' . $rd('converted'), $c['converted'], 'converted') ?>
   <?php $kpi('Clic sobre abiertos', $tot['clicked'], $pct($tot['clicked'], $tot['opened']) . ' de los que abrieron', $rate($tot['clicked'], $tot['opened']), '', $rd('clicked', 'opened'), $c['clicked']) ?>
-  <?php $kpi('Bajas desde el correo', $tot['unsubs'], $pct($tot['unsubs'], $tot['sent']) . ' de los enviados', null, 'warnk', $delta($tot['unsubs'], $c['unsubs'], false), $c['unsubs']) ?>
+  <?php $kpi('Bajas desde el correo', $tot['unsubs'], $pct($tot['unsubs'], $tot['sent']) . ' de los enviados', null, 'warnk', $delta($tot['unsubs'], $c['unsubs'], false), $c['unsubs'], 'unsubs') ?>
 </div>
 
 <?php if ($cmp): $rows = [
@@ -243,20 +260,14 @@ layout_start('Estadísticas', 'stats'); ?>
 <?php endif ?>
 
 <div class="card">
-  <div class="phead"><h2 style="margin:0">Evolución <small class="muted">por <?= $monthly ? 'mes' : 'día' ?></small></h2>
-    <div class="legend"><span><i class="lg s"></i>Enviados</span><span><i class="lg o"></i>Abiertos</span><span><i class="lg c"></i>Conversiones</span><span><i class="lg f"></i>Fallidos</span></div></div>
-  <?php if (!$tot['tried']): ?><p class="empty">No hay envíos en este periodo.</p><?php else: ?>
-  <div class="chart" style="--n:<?= count($buckets) ?>">
-    <?php $every = (int)ceil(count($buckets) / 12); $i = 0; foreach ($buckets as $k => $n): $i++; ?>
-    <div class="col" title="<?= e($bucketLabel($k)) ?> — enviados <?= $n['sent'] ?>, abiertos <?= $n['opened'] ?>, conversiones <?= $n['converted'] ?>, fallidos <?= $n['failed'] ?>">
-      <div class="bars">
-        <i class="s" style="height:<?= $n['sent'] / $chartMax * 100 ?>%"></i><i class="o" style="height:<?= $n['opened'] / $chartMax * 100 ?>%"></i><i class="c" style="height:<?= $n['converted'] / $chartMax * 100 ?>%"></i><i class="f" style="height:<?= $n['failed'] / $chartMax * 100 ?>%"></i>
-      </div>
-      <span><?= ($i - 1) % $every === 0 ? e($bucketLabel($k)) : '' ?></span>
-    </div>
-    <?php endforeach ?>
-  </div>
-  <p class="muted small-note">Máximo: <?= $chartMax ?> enviados en un <?= $monthly ? 'mes' : 'día' ?>. Pase el ratón por una columna para ver sus cifras.</p>
+  <h2 style="margin:0 0 4px">Evolución <small class="muted">por <?= $monthly ? 'mes' : 'día' ?></small></h2>
+  <?php if (!$tot['tried']): ?><p class="empty">No hay envíos en este periodo.</p><?php else:
+    $labels = array_map($bucketLabel, array_keys($buckets));
+    $ser = [['name' => 'Enviados', 'data' => array_column($buckets, 'sent'), 'color' => 1], ['name' => 'Abiertos', 'data' => array_column($buckets, 'opened'), 'color' => 3],
+        ['name' => 'Conversiones', 'data' => array_column($buckets, 'converted'), 'color' => 2], ['name' => 'Fallidos', 'data' => array_column($buckets, 'failed'), 'color' => 8]];
+    if ($cmp) $ser[] = ['name' => 'Enviados ' . $fmt($cfrom) . ' – ' . $fmt($cto), 'data' => $cSent, 'color' => 'muted', 'dash' => true]; ?>
+  <?= $chart('line', $labels, $ser, 'Evolución de los envíos', ['h' => 240, 'ratio' => [1, 0, 'Apertura']]) ?>
+  <p class="muted small-note">Pase el ratón por el gráfico para ver las cifras de cada <?= $monthly ? 'mes' : 'día' ?>.<?= $cmp ? ' La línea discontinua son los enviados del periodo comparado.' : '' ?></p>
   <?php endif ?>
 </div>
 
