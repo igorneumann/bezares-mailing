@@ -392,34 +392,85 @@ if ($a === 'edit') {
     <?php layout_end(); return;
 }
 
-/* ---------- Listado ---------- */
+/* ---------- Listado: pestañas Por enviar · En cola · Enviados (archivados por mes) · Todos ---------- */
 $rows = all("SELECT e.*, s.title survey,
     (SELECT COUNT(*) FROM queue q WHERE q.email_id = e.id AND q.status = 'sent') sent,
     (SELECT COUNT(*) FROM queue q WHERE q.email_id = e.id AND q.opened_at IS NOT NULL) opened,
-    (SELECT COUNT(*) FROM queue q WHERE q.email_id = e.id AND q.status IN ('pending','sending')) pending
+    (SELECT COUNT(*) FROM queue q WHERE q.email_id = e.id AND q.status IN ('pending','sending')) pending,
+    (SELECT MAX(q.sent_at) FROM queue q WHERE q.email_id = e.id AND q.status = 'sent') last_sent,
+    (SELECT MAX(d.created_at) FROM sends d WHERE d.email_id = e.id) last_send
     FROM emails e LEFT JOIN surveys s ON s.id = e.survey_id ORDER BY e.updated_at DESC, e.id DESC");
+$tabs = ['pend' => [], 'cola' => [], 'env' => [], 'all' => $rows];
+foreach ($rows as $r) $tabs[$r['pending'] ? 'cola' : ($r['sent'] ? 'env' : 'pend')][] = $r;
+// Enviados: del último envío al más antiguo
+$sentAt = fn($r) => (string)($r['last_sent'] ?: $r['last_send']);
+usort($tabs['env'], fn($a, $b) => strcmp($sentAt($b), $sentAt($a)) ?: $b['id'] <=> $a['id']);
+// Pestaña: la pedida, si no la última usada; al principio, «Por enviar» si hay algo pendiente y si no «Enviados»
+$tab = (string)($_GET['t'] ?? $_SESSION['emails_tab'] ?? '');
+if (!isset($tabs[$tab])) $tab = $tabs['pend'] ? 'pend' : 'env';
+$_SESSION['emails_tab'] = $tab;
+$labels = ['pend' => 'Por enviar', 'cola' => 'En cola', 'env' => 'Enviados', 'all' => 'Todos'];
+$heads = [
+    'pend' => ['Asunto', 'Tema', 'Encuesta', 'Modificado'],
+    'cola' => ['Asunto', 'Enviados', 'En cola', 'Empezó'],
+    'env'  => ['Asunto', 'Último envío', 'Enviados', 'Abiertos'],
+    'all'  => ['Asunto', 'Estado', 'Enviados', 'Abiertos'],
+];
+$pct = fn($r) => $r['sent'] ? round($r['opened'] / $r['sent'] * 100) . '%' : '—';
+$state = fn($r) => $r['pending'] ? '<span class="pill pending">En cola</span>'
+    : ($r['sent'] ? '<span class="pill subscribed">Enviado</span>'
+    : ($r['last_send'] ? '<span class="pill unsubscribed" title="Se intentó enviar y no salió ninguno">Fallido</span>' : '<span class="pill">Borrador</span>'));
+$cells = function (array $r) use ($tab, $themes, $pct, $state, $sentAt): string {
+    $c = match ($tab) {
+        'pend' => [e($themes[$r['theme']] ?? $r['theme']), e($r['survey'] ?? '—'),
+            '<span class="nowrap">' . e(fecha($r['updated_at'])) . '</span>' . ($r['last_send'] ? ' ' . $state($r) : '')],
+        'cola' => [(string)$r['sent'], '<span class="pill pending">' . $r['pending'] . ' en cola</span>', '<span class="nowrap">' . e(fecha($r['last_send'])) . '</span>'],
+        'env'  => ['<span class="nowrap">' . e(fecha($sentAt($r))) . '</span>', (string)$r['sent'], $r['opened'] . ' <span class="muted">(' . $pct($r) . ')</span>'],
+        default => [$state($r), (string)$r['sent'], $r['sent'] ? $r['opened'] . ' <span class="muted">(' . $pct($r) . ')</span>' : '—'],
+    };
+    $id = (int)$r['id'];
+    $name = '<a href="index.php?p=emails&a=edit&id=' . $id . '"><b>' . e($r['name']) . '</b></a>' . (($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '');
+    $csrf = csrf_field();
+    $ask = '¿Eliminar el correo «' . addslashes($r['name']) . '»?' . ($r['sent'] ? ' Se perderán también sus estadísticas de envío.' : '');
+    $act = '<a class="btn small primary" href="index.php?p=emails&a=send&id=' . $id . '">Enviar</a> '
+        . '<a class="btn small" href="index.php?p=emails&a=stats&id=' . $id . '">Estadísticas</a> '
+        . '<form method="post" action="index.php?p=emails&a=copy&id=' . $id . '" class="inline">' . $csrf . '<button class="btn small">Duplicar</button></form> '
+        . '<form method="post" action="index.php?p=emails&a=delete&id=' . $id . '" class="inline" onsubmit="return confirm(\'' . e($ask) . '\')">' . $csrf . '<button class="btn small danger">Eliminar</button></form>';
+    return '<tr><td>' . $name . '</td><td>' . e($r['subject']) . '</td><td>' . implode('</td><td>', $c) . '</td><td class="nowrap">' . $act . '</td></tr>';
+};
+$months = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+$empty = [
+    'pend' => 'No hay correos por enviar. <a href="index.php?p=emails&a=edit">Crear uno nuevo</a>.',
+    'cola' => 'No hay ningún envío en curso.',
+    'env'  => 'Todavía no se ha enviado ningún correo.',
+    'all'  => 'Todavía no hay correos.',
+];
 layout_start('Correos', 'emails'); ?>
 <div class="head"><h1>Correos</h1><a class="btn primary" href="index.php?p=emails&a=edit">+ Nuevo correo</a></div>
-<div class="card table"><table>
-  <thead><tr><th>Nombre</th><th>Asunto</th><th>Tema</th><th>Encuesta</th><th>Enviados</th><th>Abiertos</th><th></th></tr></thead>
-  <tbody>
-  <?php foreach ($rows as $r): ?>
-    <tr>
-      <td><a href="index.php?p=emails&a=edit&id=<?= $r['id'] ?>"><b><?= e($r['name']) ?></b></a><?= ($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '' ?></td>
-      <td><?= e($r['subject']) ?></td>
-      <td><?= e($themes[$r['theme']] ?? $r['theme']) ?></td>
-      <td><?= e($r['survey'] ?? '—') ?></td>
-      <td><?= $r['sent'] ?><?= $r['pending'] ? ' <span class="pill pending">' . $r['pending'] . ' en cola</span>' : '' ?></td>
-      <td><?= $r['opened'] ?><?= $r['sent'] ? ' <span class="muted">(' . round($r['opened'] / $r['sent'] * 100) . '%)</span>' : '' ?></td>
-      <td class="nowrap">
-        <a class="btn small primary" href="index.php?p=emails&a=send&id=<?= $r['id'] ?>">Enviar</a>
-        <a class="btn small" href="index.php?p=emails&a=stats&id=<?= $r['id'] ?>">Estadísticas</a>
-        <form method="post" action="index.php?p=emails&a=copy&id=<?= $r['id'] ?>" class="inline"><?= csrf_field() ?><button class="btn small">Duplicar</button></form>
-        <form method="post" action="index.php?p=emails&a=delete&id=<?= $r['id'] ?>" class="inline" onsubmit="return confirm('¿Eliminar el correo «<?= e(addslashes($r['name'])) ?>»?<?= $r['sent'] ? ' Se perderán también sus estadísticas de envío.' : '' ?>')"><?= csrf_field() ?><button class="btn small danger">Eliminar</button></form>
-      </td>
-    </tr>
-  <?php endforeach ?>
-  <?php if (!$rows): ?><tr><td colspan="7" class="empty">Todavía no hay correos.</td></tr><?php endif ?>
-  </tbody>
+<div class="mediabar"><div class="seg">
+  <?php foreach ($labels as $k => $l): ?><a class="<?= $tab === $k ? 'on' : '' ?>" href="index.php?p=emails&t=<?= $k ?>"><?= $l ?> <i><?= count($tabs[$k]) ?></i></a><?php endforeach ?>
+</div></div>
+<div class="card table"><table class="emaillist">
+  <thead><tr><th>Nombre</th><th><?= implode('</th><th>', $heads[$tab]) ?></th><th></th></tr></thead>
+  <?php if (!$tabs[$tab]): ?>
+    <tbody><tr><td colspan="6" class="empty"><?= $empty[$tab] ?></td></tr></tbody>
+  <?php elseif ($tab === 'env'):
+      // Archivados por mes: el más reciente abierto y el resto plegados, con un resumen de cada mes
+      $groups = [];
+      foreach ($tabs['env'] as $r) $groups[substr($sentAt($r), 0, 7)][] = $r;
+      $first = true;
+      foreach ($groups as $ym => $list):
+          $sent = array_sum(array_column($list, 'sent'));
+          $opened = array_sum(array_column($list, 'opened'));
+          $label = preg_match('/^(\d{4})-(\d{2})$/', (string)$ym, $mm) ? $months[(int)$mm[2]] . ' ' . $mm[1] : 'Sin fecha'; ?>
+    <tbody class="month<?= $first ? '' : ' closed' ?>">
+      <tr class="monthhead"><td colspan="6"><button type="button" aria-expanded="<?= $first ? 'true' : 'false' ?>" onclick="var b=this.closest('tbody');b.classList.toggle('closed');this.setAttribute('aria-expanded',!b.classList.contains('closed'))">
+        <span class="chev" aria-hidden="true"></span><b><?= e($label) ?></b>
+        <span class="muted"><?= count($list) ?> correo(s) · <?= $sent ?> enviados · <?= $sent ? round($opened / $sent * 100) : 0 ?>% abiertos</span></button></td></tr>
+      <?php foreach ($list as $r) echo $cells($r) ?>
+    </tbody>
+  <?php $first = false; endforeach; else: ?>
+    <tbody><?php foreach ($tabs[$tab] as $r) echo $cells($r) ?></tbody>
+  <?php endif ?>
 </table></div>
 <?php layout_end();

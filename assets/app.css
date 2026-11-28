@@ -328,3 +328,12 @@ label.en,.enbox label{color:#0b5f87!important}.enbox{border:1px dashed #9fc3d6;b
 
 /* Versión del programa, esquina inferior derecha */
 .app-version{position:fixed;right:10px;bottom:6px;z-index:5;font-size:.72rem;color:var(--muted);pointer-events:none;user-select:none}
+
+/* Correos: enviados archivados por mes */
+.emaillist tr.monthhead td{background:#f7f9fc;padding:0}
+.emaillist tr.monthhead button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:.6rem;width:100%;padding:.65rem 1rem;cursor:pointer;font-size:.92rem}
+.emaillist tr.monthhead button:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.emaillist tr.monthhead .muted{margin-left:auto;font-size:.85rem}
+.emaillist .chev{width:.45rem;height:.45rem;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:0 .15rem .2rem;flex:none}
+.emaillist tbody.closed .chev{transform:rotate(-45deg);margin-bottom:0}
+.emaillist tbody.closed tr:not(.monthhead){display:none}
