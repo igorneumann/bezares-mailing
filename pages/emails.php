@@ -432,7 +432,8 @@ $cells = function (array $r) use ($tab, $themes, $pct, $state, $sentAt): string 
     $name = '<a href="index.php?p=emails&a=edit&id=' . $id . '"><b>' . e($r['name']) . '</b></a>' . (($r['lang'] ?? '') === 'en' ? ' <span class="tag">EN</span>' : '');
     $csrf = csrf_field();
     $ask = '¿Eliminar el correo «' . addslashes($r['name']) . '»?' . ($r['sent'] ? ' Se perderán también sus estadísticas de envío.' : '');
-    $act = '<a class="btn small primary" href="index.php?p=emails&a=send&id=' . $id . '">Enviar</a> '
+    // Los ya enviados (o en cola) no llevan «Enviar»: para mandarlo otra vez, «Duplicar»
+    $act = ($r['sent'] || $r['pending'] ? '' : '<a class="btn small primary" href="index.php?p=emails&a=send&id=' . $id . '">Enviar</a> ')
         . '<a class="btn small" href="index.php?p=emails&a=stats&id=' . $id . '">Estadísticas</a> '
         . '<form method="post" action="index.php?p=emails&a=copy&id=' . $id . '" class="inline">' . $csrf . '<button class="btn small">Duplicar</button></form> '
         . '<form method="post" action="index.php?p=emails&a=delete&id=' . $id . '" class="inline" onsubmit="return confirm(\'' . e($ask) . '\')">' . $csrf . '<button class="btn small danger">Eliminar</button></form>';
