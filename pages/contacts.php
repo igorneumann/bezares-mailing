@@ -360,6 +360,9 @@ $to = $per > 0 ? min($total, $page * $per) : $total;
 $counts = ['subscribed' => 0, 'unsubscribed' => 0, 'bounced' => 0, 'pending' => 0];
 foreach (all('SELECT status, COUNT(*) n FROM contacts GROUP BY status') as $r) $counts[$r['status']] = (int)$r['n'];
 
+// Vista: la lista (por defecto) o fichas lado a lado; se recuerda la última elegida
+$vista = in_array($_GET['vista'] ?? '', ['cuadricula', 'lista'], true) ? $_GET['vista'] : (string)($_SESSION['contacts_view'] ?? 'lista');
+$_SESSION['contacts_view'] = $vista;
 layout_start('Contactos', 'contacts'); ?>
 <div class="head">
   <h1>Contactos <small><?= $counts['subscribed'] ?> suscritos · <?= $counts['unsubscribed'] ?> bajas</small></h1>
@@ -378,6 +381,7 @@ layout_start('Contactos', 'contacts'); ?>
   <select name="status"><option value="">Todos los estados</option><?php foreach ($STATUS as $k => $l): ?><option value="<?= $k ?>" <?= ($_GET['status'] ?? '') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach ?></select>
   <button class="btn">Filtrar</button>
   <?php if ($qs): ?><a href="index.php?p=contacts">Quitar filtros</a><?php endif ?>
+  <?= view_switch('index.php?p=contacts' . ($qs ? '&' . $qs : '') . $perQs, $vista) ?>
   <label class="perpage">Mostrar
     <select name="per" onchange="this.form.submit()"><?php foreach (PER_PAGE_OPTIONS as $n): ?><option value="<?= $n ?>" <?= $per === $n ? 'selected' : '' ?>><?= per_page_label($n) ?></option><?php endforeach ?></select></label>
 </form>
@@ -396,6 +400,21 @@ layout_start('Contactos', 'contacts'); ?>
   <button class="btn small" formaction="index.php?p=contacts&a=tagdel" data-bulk="del">− Quitar etiqueta</button>
   <button class="btn small danger" formaction="index.php?p=contacts&a=delete" data-bulk="delete">Eliminar</button>
 </div>
+<?php if ($vista === 'cuadricula'): ?>
+<?php if (!$rows): ?><div class="card"><p class="empty">No hay contactos<?= $qs ? ' con esos filtros' : '. Añada uno o importe un archivo CSV o Excel' ?>.</p></div><?php endif ?>
+<div class="co-grid">
+  <?php foreach ($rows as $c): $name = trim($c['nombre'] . ' ' . $c['apellidos']); $ini = mb_strtoupper(mb_substr($c['nombre'] ?: $c['email'], 0, 1) . mb_substr($c['apellidos'], 0, 1)); ?>
+  <article class="co-tile ct-tile">
+    <label class="ct-chk" title="Seleccionar"><input type="checkbox" name="ids[]" value="<?= $c['id'] ?>" aria-label="Seleccionar <?= e($name ?: $c['email']) ?>"></label>
+    <div class="co-tile-top"><span class="ml-ic ct-av" aria-hidden="true"><?= e($ini) ?></span><div><h2 class="co-name"><a href="index.php?p=contacts&a=edit&id=<?= $c['id'] ?>"><?= e($name ?: $c['email']) ?></a></h2>
+      <span class="pill <?= e($c['status']) ?>"><?= e($STATUS[$c['status']] ?? $c['status']) ?></span></div></div>
+    <p class="co-tile-sub"><?= e($c['email']) ?><?= $c['empresa'] !== '' ? '<br>' . e($c['empresa']) : '' ?></p>
+    <div class="ct-tags"><?php $off = optouts($c); foreach (tags_list($c['tags']) as $t): $isOff = in_array($t, $off, true); ?><span class="tag<?= $isOff ? ' off' : '' ?>"<?= $isOff ? ' title="Se dio de baja de este listado"' : '' ?>><?= e($t) ?></span><?php endforeach ?></div>
+    <div class="co-tile-kpi"><div><small>Alta</small><b><?= e(date('d/m/Y', strtotime($c['created_at']))) ?></b></div><div><small><?= $c['unsub_at'] ? 'Baja' : 'Etiquetas' ?></small><b><?= $c['unsub_at'] ? e(date('d/m/Y', strtotime($c['unsub_at']))) : count(tags_list($c['tags'])) ?></b></div></div>
+  </article>
+  <?php endforeach ?>
+</div>
+<?php else: ?>
 <div class="card table">
 <table>
   <thead><tr><th class="chk"><input type="checkbox" data-checkall></th><th>Correo</th><th>Nombre</th><th>Empresa</th><th>Etiquetas</th><th>Estado</th><th>Alta</th></tr></thead>
@@ -415,6 +434,7 @@ layout_start('Contactos', 'contacts'); ?>
   </tbody>
 </table>
 </div>
+<?php endif ?>
 <div class="foot">
   <span class="muted"><?= $total ? "Mostrando {$from}–{$to} de {$total} contacto(s)" : '0 contactos' ?></span>
   <?php if ($pages > 1): $link = fn(int $n) => 'index.php?p=contacts&page=' . $n . $perQs . ($qs ? '&' . e($qs) : ''); ?>

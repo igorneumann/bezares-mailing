@@ -468,3 +468,8 @@ body.public{padding:.6rem}
 .pt-noimg{display:flex;align-items:center;justify-content:center;font-size:34px}
 .pt-tile .co-tile-sub{margin:6px 0 8px}.pt-nets{margin-bottom:8px}.pt-tile .co-tile-kpi{margin:0 0 4px}
 .pt-more{padding-bottom:12px;font-size:13px}.pt-more summary{cursor:pointer;color:var(--brand);padding:6px 0}
+/* Contactos en fichas */
+.ct-tile{padding-top:16px}.ct-chk{position:absolute;top:12px;right:12px;margin:0}.ct-chk input{width:1rem;height:1rem}
+.ct-tile .co-tile-top{padding-right:22px}.ct-av{font-weight:700;color:var(--brand);font-size:15px;border-radius:50%}
+.ct-tags{display:flex;flex-wrap:wrap;gap:4px;min-height:1px}
+.filters .vswitch{margin-left:auto}

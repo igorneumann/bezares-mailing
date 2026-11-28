@@ -35,7 +35,7 @@
   const bulk = $('#bulkform');
   if (bulk) {
     const bar = $('[data-bulkbar]', bulk), all = $('[data-allfiltered]', bulk);
-    const boxes = () => $$('tbody input[name="ids[]"]', bulk);
+    const boxes = () => $$('input[name="ids[]"]', bulk); // filas de la lista o fichas de la cuadrícula
     const update = () => {
       const n = all && all.checked ? +all.closest('label').textContent.match(/\d+/)[0] : boxes().filter(b => b.checked).length;
       $('[data-selcount]', bar).textContent = n;
