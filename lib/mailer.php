@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/modern.php';
 require_once __DIR__ . '/smtp.php';
+require_once __DIR__ . '/surveyform.php';
 
 /* ---------- Temas ---------- */
 
@@ -596,31 +597,12 @@ function survey_stats(array $survey, string $lang = ''): array
     $answers = all('SELECT a.question_id, a.value FROM answers a JOIN responses r ON r.id = a.response_id WHERE r.survey_id = ?' . lang_filter($lang), [$survey['id']]);
     $by = [];
     foreach ($answers as $a) if ((string)$a['value'] !== '') $by[$a['question_id']][] = $a['value'];
-    foreach ($questions as &$q) {
-        $vals = $by[$q['id']] ?? [];
-        $q['n'] = count($vals);
-        if ($q['type'] === 'nps' || $q['type'] === 'rating') {
-            [$min, $max] = $q['type'] === 'nps' ? [0, 10] : [1, 5];
-            $dist = array_fill($min, $max - $min + 1, 0);
-            foreach ($vals as $v) if (isset($dist[(int)$v])) $dist[(int)$v]++;
-            $q['dist'] = $dist;
-            $q['avg'] = $q['n'] ? array_sum(array_map('intval', $vals)) / $q['n'] : null;
-            if ($q['type'] === 'nps') {
-                $q['promoters'] = $dist[9] + $dist[10];
-                $q['passives'] = $dist[7] + $dist[8];
-                $q['detractors'] = $q['n'] - $q['promoters'] - $q['passives'];
-                $q['nps'] = $q['n'] ? (int)round(($q['promoters'] - $q['detractors']) / $q['n'] * 100) : null;
-            }
-        } elseif ($q['type'] === 'radio' || $q['type'] === 'checkbox') {
-            $dist = [];
-            foreach (question_options($q) as $o) $dist[$o] = 0;
-            foreach ($vals as $v) foreach (explode(' | ', $v) as $p) $dist[$p] = ($dist[$p] ?? 0) + 1;
-            $q['dist'] = $dist;
-        } else {
-            $q['texts'] = $vals;
-        }
+    $out = [];
+    foreach ($questions as $q) {
+        if ($q['type'] === 'section') continue; // los títulos de sección no tienen respuesta
+        $out[] = $q + sf_stats($q, $by[$q['id']] ?? []);
     }
-    return $questions;
+    return $out;
 }
 function question_options(array $q): array
 {
@@ -705,6 +687,7 @@ function survey_notify(array $survey, array $questions, array $values, string $e
         if (!$verified) $rows[] = ['Verificación', '<b style="color:#a12626;">Sin verificar</b>: llegó por el formulario público y el correo lo escribió quien respondió; puede no ser suyo.'];
         $rows[] = ['Fecha', date('d/m/Y H:i')];
         foreach ($questions as $q) {
+            if ($q['type'] === 'section') continue;
             $v = (string)($values[$q['id']] ?? '');
             $shown = $v === '' ? '<span style="color:#999;">(sin respuesta)</span>' : nl2br(e($v));
             if (in_array($q['type'], ['nps', 'rating'], true) && $v !== '') {

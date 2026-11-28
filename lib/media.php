@@ -419,7 +419,7 @@ function media_usage(string $name): array
 function migrate(): void
 {
     $v = (int)setting('schema', '1');
-    if ($v >= 11) return;
+    if ($v >= 12) return;
     $try = function (string $sql) { try { db()->exec($sql); } catch (Throwable $e) { /* ya existe */ } };
     if ($v < 2) $try('ALTER TABLE emails ADD COLUMN attachments TEXT');
     // v3: tabla de campañas NPS automáticas (CREATE TABLE IF NOT EXISTS del esquema completo)
@@ -470,6 +470,11 @@ function migrate(): void
     // v11: «Mantener la sesión iniciada» con fichas en la base de datos (la tabla la crea el CREATE TABLE de arriba)
     $try('CREATE INDEX ix_remember_user ON remember_tokens (user_id)');
     set_setting('schema', '11');
+    // v12: diseñador de encuestas nuevo. Cada pregunta guarda lo propio de su tipo (ayuda, escala, filas, condición) y
+    // cada encuesta sus opciones (por pasos) en una columna JSON
+    $try('ALTER TABLE questions ADD COLUMN config TEXT');
+    $try('ALTER TABLE surveys ADD COLUMN config TEXT');
+    set_setting('schema', '12');
     if ($v < 4 && function_exists('nps_bilingual_setup')) { try { nps_bilingual_setup(); } catch (Throwable $e) {} }
     try { nps_notify_setup(); } catch (Throwable $e) {}
 }

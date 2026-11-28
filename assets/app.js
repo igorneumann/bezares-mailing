@@ -440,30 +440,157 @@
     nm.addEventListener('change', upd); upd();
   }
 
-  /* ---------- Editor de preguntas ---------- */
-  const qs = $('#questions');
-  if (qs) {
+  /* ---------- Diseñador de encuestas: pestañas, preguntas plegables, tipos, condiciones y vista previa en directo ---------- */
+  const sfEd = document.querySelector('[data-sf-editor]');
+  if (sfEd) {
+    const qs = sfEd.querySelector('#questions');
     let next = 1000;
-    const refresh = row => {
-      const t = $('[data-qtype]', row).value;
-      $('[data-qopts]', row).hidden = !(t === 'radio' || t === 'checkbox');
+    const cards = () => Array.from(qs.querySelectorAll('[data-q]'));
+    /* Pestañas (sin JavaScript se ven todas) */
+    const tabs = Array.from(sfEd.querySelectorAll('[data-tab]'));
+    const showTab = k => {
+      tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === k));
+      sfEd.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== k; });
     };
-    $$('[data-q]', qs).forEach(refresh);
-    qs.addEventListener('change', e => { if (e.target.matches('[data-qtype]')) refresh(e.target.closest('[data-q]')); });
-    qs.addEventListener('click', e => {
-      const row = e.target.closest('[data-q]');
-      if (!row) return;
-      if (e.target.matches('[data-del]')) {
-        if ($$('[data-q]', qs).length > 1 && confirm('¿Quitar esta pregunta? Sus respuestas se borrarán al guardar.')) row.remove();
-      } else if (e.target.matches('[data-up]') && row.previousElementSibling) qs.insertBefore(row, row.previousElementSibling);
-      else if (e.target.matches('[data-down]') && row.nextElementSibling) qs.insertBefore(row.nextElementSibling, row);
-    });
-    $('#addq').addEventListener('click', () => {
+    tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+    showTab('q');
+    /* Una pregunta: lo que se ve según el tipo y el resumen de la línea plegada */
+    const refresh = card => {
+      const sel = card.querySelector('[data-qtype]'), t = sel.value, opt = sel.selectedOptions[0];
+      card.querySelectorAll('[data-show]').forEach(el => { el.hidden = el.dataset.show.split(' ').indexOf(t) < 0; });
+      card.querySelectorAll('[data-hide]').forEach(el => { el.hidden = el.dataset.hide.split(' ').indexOf(t) >= 0; });
+      card.querySelector('[data-label-q]').textContent = t === 'section' ? 'Título de la sección' : 'Pregunta';
+      const ol = card.querySelector('[data-opts-label]');
+      if (ol) ol.textContent = t === 'matrix' ? 'Columnas: la escala de cada fila (una por línea)' : (t === 'rank' ? 'Elementos a ordenar (uno por línea)' : 'Opciones (una por línea)');
+      card.querySelector('[data-qic]').textContent = opt ? opt.dataset.ic : '';
+      card.querySelector('[data-qty]').textContent = opt ? opt.textContent.replace(/^\S+\s/, '') : '';
+      const lab = card.querySelector('[data-qlabel]').value.trim();
+      card.querySelector('[data-qlab]').innerHTML = lab ? '' : '<i>Sin texto</i>';
+      if (lab) card.querySelector('[data-qlab]').textContent = lab;
+      card.querySelector('[data-qreq]').hidden = !(card.querySelector('[data-qrequired]').checked && t !== 'section');
+      const on = card.querySelector('[data-cond-on]').checked;
+      card.querySelector('[data-cond-box]').hidden = !on;
+      card.querySelector('[data-qcondb]').hidden = !(on && card.querySelector('[data-cond-ref]').value);
+    };
+    /* Números y lista de preguntas anteriores en cada condición */
+    const renumber = () => {
+      const list = cards();
+      let n = 0;
+      list.forEach((c, i) => {
+        const t = c.querySelector('[data-qtype]').value;
+        c.querySelector('.qn').textContent = t === 'section' ? '§' : ++n;
+        const sel = c.querySelector('[data-cond-ref]'), cur = sel.value || sel.dataset.cur || '';
+        sel.innerHTML = '<option value="">la pregunta…</option>';
+        let m = 0;
+        list.slice(0, i).forEach(p => {
+          const pt = p.querySelector('[data-qtype]').value;
+          if (pt === 'section') return;
+          m++;
+          const o = document.createElement('option');
+          o.value = p.dataset.i;
+          o.textContent = m + '. ' + (p.querySelector('[data-qlabel]').value.trim() || 'Sin texto').slice(0, 60);
+          if (o.value === cur) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.dataset.cur = sel.value;
+      });
+      const qc = sfEd.querySelector('[data-qcount]');
+      if (qc) qc.textContent = list.filter(c => c.querySelector('[data-qtype]').value !== 'section').length;
+    };
+    /* Vista previa en directo: se envía el formulario a la vista previa (sin guardar) dentro del iframe */
+    const frame = sfEd.querySelector('[data-pv-frame]');
+    let pvTimer = 0;
+    const preview = () => {
+      if (!frame) return;
+      cards().forEach(c => { if (!c.querySelector('[data-cond-on]').checked) c.querySelector('[data-cond-ref]').value = ''; });
+      const action = sfEd.getAttribute('action'), target = sfEd.getAttribute('target');
+      sfEd.setAttribute('action', sfEd.dataset.preview);
+      sfEd.setAttribute('target', frame.name);
+      HTMLFormElement.prototype.submit.call(sfEd);
+      sfEd.setAttribute('action', action);
+      if (target) sfEd.setAttribute('target', target); else sfEd.removeAttribute('target');
+    };
+    const later = () => { clearTimeout(pvTimer); pvTimer = setTimeout(preview, 500); };
+    sfEd.querySelectorAll('[data-pv]').forEach(a => a.addEventListener('click', e => {
+      e.preventDefault();
+      sfEd.querySelectorAll('[data-pv]').forEach(x => x.classList.toggle('on', x === a));
+      sfEd.querySelector('[data-pv-lang]').value = a.dataset.pv;
+      preview();
+    }));
+    /* Añadir, duplicar, quitar y ordenar */
+    const add = (type, after) => {
       const d = document.createElement('div');
-      d.innerHTML = $('#qtpl').innerHTML.replace(/__I__/g, String(next++));
-      const row = d.firstElementChild;
-      qs.appendChild(row); refresh(row); $('input[name$="[label]"]', row).focus();
+      d.innerHTML = document.getElementById('qtpl').innerHTML.replace(/__I__/g, String(next++));
+      const card = d.firstElementChild;
+      if (after) after.after(card); else qs.appendChild(card);
+      if (type) card.querySelector('[data-qtype]').value = type;
+      cards().forEach(c => { if (c !== card) c.open = false; });
+      card.open = true;
+      refresh(card); renumber(); later();
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      card.querySelector('[data-qlabel]').focus({ preventScroll: true });
+      return card;
+    };
+    sfEd.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => add(b.dataset.add)));
+    qs.addEventListener('click', e => {
+      const card = e.target.closest('[data-q]');
+      if (!card) return;
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-del')) {
+        if (cards().length > 1 && confirm('¿Quitar esta pregunta? Sus respuestas se borrarán al guardar.')) card.remove();
+      } else if (b.hasAttribute('data-up') && card.previousElementSibling) qs.insertBefore(card, card.previousElementSibling);
+      else if (b.hasAttribute('data-down') && card.nextElementSibling) qs.insertBefore(card.nextElementSibling, card);
+      else if (b.hasAttribute('data-dup')) {
+        const copy = add(card.querySelector('[data-qtype]').value, card);
+        card.querySelectorAll('input, select, textarea').forEach(src => {
+          const m = /^q\[[^\]]+\]\[(.+)\]$/.exec(src.name || '');
+          if (!m || m[1] === 'id') return;
+          const dst = copy.querySelector('[name$="[' + m[1] + ']"]');
+          if (!dst) return;
+          if (src.type === 'checkbox') dst.checked = src.checked; else dst.value = src.value;
+        });
+        copy.querySelector('[data-cond-on]').checked = card.querySelector('[data-cond-on]').checked;
+        refresh(copy);
+      } else return;
+      renumber(); later();
     });
+    /* Arrastrar por el asa ⋮⋮ */
+    let drag = null;
+    qs.addEventListener('dragstart', e => {
+      if (!e.target.classList || !e.target.classList.contains('qgrip')) return;
+      drag = e.target.closest('[data-q]');
+      drag.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', '');
+    });
+    qs.addEventListener('dragover', e => {
+      if (!drag) return;
+      e.preventDefault();
+      const over = e.target.closest('[data-q]');
+      if (!over || over === drag) return;
+      const r = over.getBoundingClientRect();
+      qs.insertBefore(drag, e.clientY < r.top + r.height / 2 ? over : over.nextElementSibling);
+    });
+    qs.addEventListener('dragend', () => { if (drag) { drag.classList.remove('dragging'); drag = null; renumber(); later(); } });
+    /* Cambios: resumen, números, condiciones y vista previa */
+    sfEd.addEventListener('input', e => { const c = e.target.closest('[data-q]'); if (c) refresh(c); if (e.target.matches('[data-qlabel]')) renumber(); later(); });
+    sfEd.addEventListener('change', e => {
+      const c = e.target.closest('[data-q]');
+      if (c) { refresh(c); if (e.target.matches('[data-qtype]')) renumber(); }
+      if (e.target.matches('[data-cond-on]') && !e.target.checked) c.querySelector('[data-cond-ref]').value = '';
+      if (e.target.matches('[data-active]')) {
+        const pill = sfEd.querySelector('[data-status-pill]');
+        pill.textContent = e.target.checked ? 'Abierta' : 'Cerrada';
+        pill.className = 'pill ' + (e.target.checked ? 'subscribed' : 'unsubscribed');
+      }
+      later();
+    });
+    /* Al guardar: las condiciones desmarcadas no se envían */
+    sfEd.addEventListener('submit', () => cards().forEach(c => { if (!c.querySelector('[data-cond-on]').checked) c.querySelector('[data-cond-ref]').value = ''; }));
+    cards().forEach(refresh);
+    renumber();
+    preview();
   }
 
   /* ---------- Progreso del envío ---------- */
