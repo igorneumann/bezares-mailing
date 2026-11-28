@@ -263,7 +263,7 @@ if ($a === 'send' && $email) {
     $ready = valid_email(setting('from_email')) && (setting('driver') === 'mail' || setting('smtp_host') !== '');
     layout_start('Enviar', 'emails'); ?>
     <div class="head"><h1>Enviar: <?= e($email['name']) ?></h1>
-      <div class="actions"><a class="btn" href="index.php?p=emails&a=stats&id=<?= $id ?>">Estadísticas</a><a class="btn" href="index.php?p=emails&a=edit&id=<?= $id ?>">Editar</a><a class="btn" href="index.php?p=emails">Volver</a></div></div>
+      <div class="actions"><?php if (val('SELECT COUNT(*) FROM sends WHERE email_id = ?', [$id])): ?><a class="btn" href="index.php?p=emails&a=stats&id=<?= $id ?>">Estadísticas</a><?php endif ?><a class="btn" href="index.php?p=emails&a=edit&id=<?= $id ?>">Editar</a><a class="btn" href="index.php?p=emails">Volver</a></div></div>
     <?php if (!$ready): ?><div class="flash err">Antes de enviar, configure el remitente y el servidor de correo en <a href="index.php?p=settings">Ajustes</a>.</div><?php endif ?>
     <div class="split">
       <div>
@@ -310,7 +310,7 @@ if ($a === 'edit') {
       <div class="actions">
         <button class="btn primary">Guardar</button>
         <button class="btn" name="next" value="send">Guardar y enviar…</button>
-        <?php if ($m['id']): ?><a class="btn" href="index.php?p=emails&a=stats&id=<?= (int)$m['id'] ?>">Estadísticas</a><?php endif ?>
+        <?php if ($m['id'] && val('SELECT COUNT(*) FROM sends WHERE email_id = ?', [(int)$m['id']])): ?><a class="btn" href="index.php?p=emails&a=stats&id=<?= (int)$m['id'] ?>">Estadísticas</a><?php endif ?>
         <a class="btn" href="index.php?p=emails">Volver</a>
       </div></div>
     <div class="split editing">
@@ -434,7 +434,7 @@ $cells = function (array $r) use ($tab, $themes, $pct, $state, $sentAt): string 
     $ask = '¿Eliminar el correo «' . addslashes($r['name']) . '»?' . ($r['sent'] ? ' Se perderán también sus estadísticas de envío.' : '');
     // Los ya enviados (o en cola) no llevan «Enviar»: para mandarlo otra vez, «Duplicar»
     $act = ($r['sent'] || $r['pending'] ? '' : '<a class="btn small primary" href="index.php?p=emails&a=send&id=' . $id . '">Enviar</a> ')
-        . '<a class="btn small" href="index.php?p=emails&a=stats&id=' . $id . '">Estadísticas</a> '
+        . ($r['sent'] || $r['pending'] || $r['last_send'] ? '<a class="btn small" href="index.php?p=emails&a=stats&id=' . $id . '">Estadísticas</a> ' : '') // sin enviar no hay estadísticas (los fallidos sí, con el motivo)
         . '<form method="post" action="index.php?p=emails&a=copy&id=' . $id . '" class="inline">' . $csrf . '<button class="btn small">Duplicar</button></form> '
         . '<form method="post" action="index.php?p=emails&a=delete&id=' . $id . '" class="inline" onsubmit="return confirm(\'' . e($ask) . '\')">' . $csrf . '<button class="btn small danger">Eliminar</button></form>';
     return '<tr><td>' . $name . '</td><td>' . e($r['subject']) . '</td><td>' . implode('</td><td>', $c) . '</td><td class="nowrap">' . $act . '</td></tr>';
